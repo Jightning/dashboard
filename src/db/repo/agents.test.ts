@@ -44,3 +44,78 @@ describe("agent naming helpers", () => {
         expect(delegationToolName(def)).toBe("ask_research_agent");
     });
 });
+
+import {
+    createAgent,
+    deleteAgent,
+    duplicateAgent,
+    getAgent,
+    listAgents,
+    seedBuiltinAgents,
+    updateAgent,
+    BUILTIN_AGENT_IDS,
+} from "./agents";
+import { agentToolNames } from "@/lib/schemas";
+
+describe("agents repo", () => {
+    it("seeds builtin knowledge and research agents idempotently", async () => {
+        await seedBuiltinAgents();
+        await seedBuiltinAgents(); // must not throw or duplicate
+        const agents = await listAgents();
+        expect(agents.map((a) => a.id).sort()).toEqual([
+            BUILTIN_AGENT_IDS.knowledge,
+            BUILTIN_AGENT_IDS.research,
+        ]);
+        const knowledge = await getAgent(BUILTIN_AGENT_IDS.knowledge);
+        expect(knowledge.is_builtin).toBe(1);
+        expect(agentToolNames(knowledge)).toContain("search_documents");
+    });
+
+    it("creates, updates, and deletes a custom agent", async () => {
+        const created = await createAgent({
+            name: "Writer",
+            description: "Drafts notes",
+            instructions: "You write concise notes.",
+            tools: ["write_note"],
+        });
+        expect(created.max_steps).toBe(6);
+
+        const updated = await updateAgent(created.id, {
+            name: "Writer",
+            description: "Drafts notes",
+            instructions: "You write very concise notes.",
+            tools: ["write_note", "search_notes"],
+            maxSteps: 4,
+        });
+        expect(updated.max_steps).toBe(4);
+        expect(agentToolNames(updated)).toEqual(["write_note", "search_notes"]);
+
+        await deleteAgent(created.id);
+        await expect(getAgent(created.id)).rejects.toThrow(/not found/);
+    });
+
+    it("refuses to delete builtin agents but allows editing them", async () => {
+        await seedBuiltinAgents();
+        await expect(
+            deleteAgent(BUILTIN_AGENT_IDS.knowledge),
+        ).rejects.toThrow(/built-in/);
+        const edited = await updateAgent(BUILTIN_AGENT_IDS.knowledge, {
+            name: "Knowledge",
+            description: "custom desc",
+            instructions: "custom instructions",
+            tools: ["search_documents"],
+        });
+        expect(edited.description).toBe("custom desc");
+        expect(edited.is_builtin).toBe(1);
+    });
+
+    it("duplicates an agent with a distinct name", async () => {
+        await seedBuiltinAgents();
+        const copy = await duplicateAgent(BUILTIN_AGENT_IDS.research);
+        expect(copy.name).toBe("Research copy");
+        expect(copy.is_builtin).toBe(0);
+        expect(copy.instructions).toBe(
+            (await getAgent(BUILTIN_AGENT_IDS.research)).instructions,
+        );
+    });
+});

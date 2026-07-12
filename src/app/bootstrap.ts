@@ -2,6 +2,7 @@ import { setDb } from "@/db/client";
 import { createTauriDbClient } from "@/db/tauriClient";
 import { createWebDbClient } from "@/db/webClient";
 import { seedBuiltinLevels } from "@/db/repo/permissions";
+import { seedBuiltinAgents } from "@/db/repo/agents";
 import { seedBuiltinPresets } from "@/db/repo/presets";
 import {
     createTauriSettingsStore,
@@ -45,6 +46,7 @@ async function runBootstrap(): Promise<BootResult> {
     const settings = await settingsStore.load();
 
     await seedBuiltinLevels();
+    await seedBuiltinAgents();
     await seedBuiltinPresets({
         provider: settings.defaultProvider,
         model: settings.defaultModel,
