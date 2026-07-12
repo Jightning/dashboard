@@ -14,6 +14,12 @@ pub fn migrations() -> Vec<Migration> {
             sql: include_str!("../migrations/0002_notes.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 3,
+            description: "agents table + preset agent ids",
+            sql: include_str!("../migrations/0003_agents.sql"),
+            kind: MigrationKind::Up,
+        },
     ]
 }
 

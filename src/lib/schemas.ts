@@ -55,6 +55,41 @@ export function presetAgents(preset: Preset): AgentName[] {
         .parse(JSON.parse(preset.enabled_agents_json));
 }
 
+export const agentDefSchema = z.object({
+    id: z.string(),
+    name: z.string(),
+    description: z.string(),
+    instructions: z.string(),
+    tools_json: z.string(),
+    model: z.string().nullable(),
+    max_steps: z.number(),
+    color: z.string().nullable(),
+    is_builtin: sqlBool,
+    created_at: z.number(),
+    updated_at: z.number(),
+});
+export type AgentDef = z.infer<typeof agentDefSchema>;
+
+/** Tool names (from the tool catalog) this agent may use. */
+export function agentToolNames(def: AgentDef): string[] {
+    return z.array(z.string()).parse(JSON.parse(def.tools_json));
+}
+
+/** "HN Digest v2" -> "hn_digest_v2" — used for tool names, usage rows, colors. */
+export function agentSlug(name: string): string {
+    const slug = name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "_")
+        .replace(/^_+|_+$/g, "");
+    if (!slug) throw new Error(`agent name produces an empty slug: ${name}`);
+    return slug;
+}
+
+/** The orchestrator-facing delegation tool name for an agent. */
+export function delegationToolName(def: AgentDef): string {
+    return `ask_${agentSlug(def.name)}_agent`;
+}
+
 export const chatSessionSchema = z.object({
     id: z.string(),
     title: z.string(),
