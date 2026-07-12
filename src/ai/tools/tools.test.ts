@@ -2,8 +2,10 @@ import { beforeEach, afterEach, describe, expect, it } from "vitest";
 import { createTestDbClient } from "@/db/testClient";
 import { setDb } from "@/db/client";
 import { insertDocument } from "@/db/repo/documents";
+import { getNote } from "@/db/repo/notes";
 import { PermissionContext, type DeniedResult } from "./context";
 import { createDocumentTools } from "./documents";
+import { createNoteTools } from "./notes";
 import { createWebTools, htmlToText, urlScope, FETCH_TEXT_LIMIT } from "./web";
 import type { ApprovalVerdict } from "@/ai/permissions/broker";
 
@@ -228,5 +230,42 @@ describe("fetch_url behavior", () => {
     it("htmlToText handles entities and block breaks", () => {
         expect(htmlToText("<p>a</p><p>b</p>")).toBe("a\nb");
         expect(htmlToText("x &lt;3 &quot;y&quot;")).toBe('x <3 "y"');
+    });
+});
+
+describe("write_note tool", () => {
+    it("creates a note when a write grant covers the folder", async () => {
+        permissions.levelGrants = [
+            {
+                tool: "write_note",
+                access: "write",
+                scopeType: "doc_folder",
+                scopeValue: "/automations",
+            },
+        ];
+        const { asked, unsubscribe } = autoRespond("deny");
+        const tools = createNoteTools(permissions);
+        const result = (await tools.write_note.execute!(
+            { title: "Digest", folder: "/automations", body_md: "# hi" },
+            execOpts,
+        )) as { id: string; title: string; folder: string };
+        unsubscribe();
+        expect(asked).toEqual([]); // never asked, in-scope grant covers it
+        expect(result.title).toBe("Digest");
+        const note = await getNote(result.id);
+        expect(note.body_md).toBe("# hi");
+        expect(note.folder).toBe("/automations");
+    });
+
+    it("asks (and honors deny) outside the granted folder", async () => {
+        const { asked, unsubscribe } = autoRespond("deny");
+        const tools = createNoteTools(permissions);
+        const result = (await tools.write_note.execute!(
+            { title: "X", folder: "/personal", body_md: "no" },
+            execOpts,
+        )) as DeniedResult;
+        unsubscribe();
+        expect(asked).toEqual(["write_note:/personal"]);
+        expect(result.denied).toBe(true);
     });
 });

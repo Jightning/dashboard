@@ -1,6 +1,6 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { getNote, listNotes, searchNotes } from "@/db/repo/notes";
+import { createNote, getNote, listNotes, searchNotes } from "@/db/repo/notes";
 import { normalizeFolder } from "@/db/repo/documents";
 import type { ResolvedScope } from "@/ai/permissions/types";
 import type { PermissionContext, ScopeResolver } from "./context";
@@ -26,6 +26,15 @@ const listInput = z.object({
         .describe("Folder to list, e.g. /school. Omit for all."),
 });
 
+const writeInput = z.object({
+    title: z.string().describe("Title for the new note"),
+    folder: z
+        .string()
+        .optional()
+        .describe("Folder to file the note under, e.g. /automations. Defaults to /."),
+    body_md: z.string().describe("Markdown body of the note"),
+});
+
 /**
  * Note folders are permission scopes. They reuse the `doc_folder` scope type
  * (a generic folder path) — grants stay distinct because they also key on the
@@ -44,6 +53,13 @@ export const noteScopeResolvers: Record<string, ScopeResolver> = {
             scopeValue: note.folder,
         };
     },
+    write_note: (input) => ({
+        access: "write",
+        scopeType: "doc_folder",
+        scopeValue: normalizeFolder(
+            (input as z.infer<typeof writeInput>).folder ?? "/",
+        ),
+    }),
 };
 
 function folderScope(folder: string | undefined): ResolvedScope {
@@ -99,6 +115,23 @@ export function createNoteTools(permissions: PermissionContext) {
                         title: n.title,
                         folder: n.folder,
                     }));
+                },
+            ),
+        }),
+        write_note: tool({
+            description:
+                "Create a new markdown note in the user's notes. Use to save summaries, drafts, or results the user should keep.",
+            inputSchema: writeInput,
+            execute: permissions.gated(
+                "write_note",
+                noteScopeResolvers.write_note!,
+                async (input: z.infer<typeof writeInput>) => {
+                    const note = await createNote({
+                        title: input.title,
+                        folder: input.folder,
+                        bodyMd: input.body_md,
+                    });
+                    return { id: note.id, title: note.title, folder: note.folder };
                 },
             ),
         }),
