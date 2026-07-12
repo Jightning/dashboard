@@ -46,6 +46,8 @@ export async function buildSessionAgent(opts: {
         mainModelId: preset.model,
         routerModel,
         routerModelId,
+        resolveModel: (modelId) =>
+            createModel({ provider, modelId }, runtimeBase),
         fetch: opts.fetch,
         onUsage: opts.onUsage,
     };

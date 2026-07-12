@@ -63,6 +63,7 @@ function makeRuntime(overrides: {
         mainModelId: "mock-main",
         routerModel: overrides.routerModel,
         routerModelId: "mock-router",
+        resolveModel: (modelId) => new MockLanguageModelV3({ modelId }),
         fetch: async () => new Response("stub"),
         onUsage: overrides.onUsage,
     };
