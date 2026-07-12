@@ -36,6 +36,20 @@ export async function createTauriSettingsStore(): Promise<SettingsStore> {
     };
 }
 
+/** Browser store: settings persisted in localStorage (web target). */
+export function createLocalStorageSettingsStore(): SettingsStore {
+    const KEY = "dashboard.settings";
+    return {
+        async load() {
+            const raw = localStorage.getItem(KEY);
+            return settingsSchema.parse(raw ? JSON.parse(raw) : {});
+        },
+        async save(settings) {
+            localStorage.setItem(KEY, JSON.stringify(settings));
+        },
+    };
+}
+
 /** In-memory store for tests and non-Tauri contexts. */
 export function createMemorySettingsStore(
     initial?: Partial<Settings>,

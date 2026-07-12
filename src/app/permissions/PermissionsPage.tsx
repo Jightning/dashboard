@@ -12,6 +12,9 @@ const KNOWN_TOOLS = [
     "search_documents",
     "read_document",
     "list_documents",
+    "search_notes",
+    "read_note",
+    "list_notes",
     "fetch_url",
 ];
 
@@ -43,11 +46,16 @@ export function PermissionsPage() {
     return (
         <div className="h-full overflow-y-auto p-6">
             <div className="mx-auto flex max-w-2xl flex-col gap-4">
-                <div className="text-sm text-muted-foreground">
-                    A permission level is a named set of scoped grants. Pick one
-                    per chat; anything a level doesn't grant still shows an
-                    approval card.
-                </div>
+                <header>
+                    <h1 className="font-display text-2xl font-bold tracking-wide">
+                        Permissions
+                    </h1>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                        A permission level is a named set of scoped grants. Pick
+                        one per chat; anything a level doesn't grant still shows
+                        an approval card.
+                    </p>
+                </header>
 
                 {levels.map((level) => (
                     <LevelCard

@@ -15,10 +15,27 @@ export default defineConfig({
     server: {
         port: 1420,
         strictPort: true,
+        // Required for OPFS (the web target's persistent SQLite storage) —
+        // see @sqlite.org/sqlite-wasm's README. No-op inside the Tauri
+        // webview, which doesn't use this dev server's headers at request
+        // time for its own asset loading.
+        headers: {
+            "Cross-Origin-Opener-Policy": "same-origin",
+            "Cross-Origin-Embedder-Policy": "require-corp",
+        },
+    },
+    preview: {
+        headers: {
+            "Cross-Origin-Opener-Policy": "same-origin",
+            "Cross-Origin-Embedder-Policy": "require-corp",
+        },
     },
     envPrefix: ["VITE_", "TAURI_ENV_"],
     build: {
         target: "es2022",
+    },
+    optimizeDeps: {
+        exclude: ["@sqlite.org/sqlite-wasm"],
     },
     test: {
         environment: "node",

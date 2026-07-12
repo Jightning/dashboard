@@ -4,7 +4,7 @@
  * Never import this from application code — better-sqlite3 is a dev dependency.
  */
 import BetterSqlite3 from "better-sqlite3";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { DbClient } from "./client";
@@ -17,7 +17,12 @@ const migrationsDir = join(
 export function createTestDbClient(): DbClient & { close: () => void } {
     const db = new BetterSqlite3(":memory:");
     db.pragma("foreign_keys = ON");
-    db.exec(readFileSync(join(migrationsDir, "0001_init.sql"), "utf8"));
+    // Run every migration in order so tests match the app schema exactly.
+    for (const file of readdirSync(migrationsDir)
+        .filter((f) => f.endsWith(".sql"))
+        .sort()) {
+        db.exec(readFileSync(join(migrationsDir, file), "utf8"));
+    }
 
     return {
         async select<T>(sql: string, params: unknown[] = []): Promise<T[]> {

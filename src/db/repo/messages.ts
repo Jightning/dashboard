@@ -66,6 +66,14 @@ export async function markCompacted(ids: string[]): Promise<void> {
     );
 }
 
+export async function sessionMessageCount(sessionId: string): Promise<number> {
+    const rows = await getDb().select<{ n: number }>(
+        "SELECT COUNT(*) AS n FROM chat_messages WHERE session_id = ?",
+        [sessionId],
+    );
+    return rows[0]?.n ?? 0;
+}
+
 export interface SessionUsageTotals {
     inputTokens: number;
     outputTokens: number;

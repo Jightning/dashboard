@@ -1,49 +1,64 @@
 @import "tailwindcss";
 
-/* Theme tokens (shadcn-compatible). Design polish happens later by editing these
-   variables and the components in src/components/ui — nothing else should hardcode
-   colors. */
+/* ============================================================================
+   AI OS design tokens — HUD / sci-fi FUI, dark-committed.
+   Single source of truth: components must consume these tokens (via the
+   Tailwind theme below or var()) — never raw hex/oklch values.
+   Full guide: docs/design.md
+   ========================================================================== */
 :root {
-    --background: oklch(1 0 0);
-    --foreground: oklch(0.145 0 0);
-    --card: oklch(1 0 0);
-    --card-foreground: oklch(0.145 0 0);
-    --primary: oklch(0.205 0 0);
-    --primary-foreground: oklch(0.985 0 0);
-    --secondary: oklch(0.97 0 0);
-    --secondary-foreground: oklch(0.205 0 0);
-    --muted: oklch(0.97 0 0);
-    --muted-foreground: oklch(0.556 0 0);
-    --accent: oklch(0.97 0 0);
-    --accent-foreground: oklch(0.205 0 0);
-    --destructive: oklch(0.577 0.245 27.325);
-    --destructive-foreground: oklch(0.985 0 0);
-    --border: oklch(0.922 0 0);
-    --input: oklch(0.922 0 0);
-    --ring: oklch(0.708 0 0);
-    --radius: 0.5rem;
-}
+    /* Surfaces — deep space navy, lighter as elevation rises */
+    --background: oklch(0.14 0.02 250);
+    --foreground: oklch(0.93 0.012 220);
+    --card: oklch(0.175 0.025 250);
+    --card-foreground: oklch(0.93 0.012 220);
+    --surface-raised: oklch(0.22 0.03 248);
 
-@media (prefers-color-scheme: dark) {
-    :root {
-        --background: oklch(0.145 0 0);
-        --foreground: oklch(0.985 0 0);
-        --card: oklch(0.205 0 0);
-        --card-foreground: oklch(0.985 0 0);
-        --primary: oklch(0.922 0 0);
-        --primary-foreground: oklch(0.205 0 0);
-        --secondary: oklch(0.269 0 0);
-        --secondary-foreground: oklch(0.985 0 0);
-        --muted: oklch(0.269 0 0);
-        --muted-foreground: oklch(0.708 0 0);
-        --accent: oklch(0.269 0 0);
-        --accent-foreground: oklch(0.985 0 0);
-        --destructive: oklch(0.704 0.191 22.216);
-        --destructive-foreground: oklch(0.985 0 0);
-        --border: oklch(1 0 0 / 10%);
-        --input: oklch(1 0 0 / 15%);
-        --ring: oklch(0.556 0 0);
-    }
+    /* Holographic cyan core */
+    --primary: oklch(0.8 0.125 210);
+    --primary-foreground: oklch(0.16 0.03 250);
+    --secondary: oklch(0.62 0.16 255);
+    --secondary-foreground: oklch(0.97 0.01 220);
+
+    --muted: oklch(0.22 0.025 248);
+    --muted-foreground: oklch(0.7 0.025 230);
+    --accent: oklch(0.25 0.04 235);
+    --accent-foreground: oklch(0.95 0.015 215);
+
+    /* Status */
+    --destructive: oklch(0.63 0.19 25);
+    --destructive-foreground: oklch(0.97 0.01 220);
+    --warning: oklch(0.79 0.14 80);
+    --warning-foreground: oklch(0.2 0.05 80);
+    --success: oklch(0.76 0.15 160);
+    --success-foreground: oklch(0.18 0.05 160);
+
+    /* Lines & focus */
+    --border: oklch(0.75 0.08 215 / 20%);
+    --input: oklch(0.75 0.08 215 / 28%);
+    --ring: oklch(0.8 0.125 210);
+    --grid-line: oklch(0.78 0.09 215 / 5%);
+    --glow: oklch(0.8 0.125 210 / 30%);
+
+    /* Agent identity — one hue per agent; add a token here per new agent */
+    --agent-orchestrator: oklch(0.8 0.125 210);
+    --agent-knowledge: oklch(0.72 0.15 295);
+    --agent-research: oklch(0.76 0.15 160);
+
+    --radius: 0.375rem;
+
+    /* Force native controls (select popups, checkboxes, scrollbars) to render
+       dark regardless of the OS/GTK system theme — without this WebKitGTK
+       draws light popups and near-white option text becomes unreadable. */
+    color-scheme: dark;
+    accent-color: var(--primary);
+
+    /* Motion — every animation uses these; keep the rhythm unified */
+    --dur-fast: 150ms;
+    --dur-med: 250ms;
+    --dur-slow: 400ms;
+    --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+    --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
 }
 
 @theme inline {
@@ -51,6 +66,7 @@
     --color-foreground: var(--foreground);
     --color-card: var(--card);
     --color-card-foreground: var(--card-foreground);
+    --color-surface-raised: var(--surface-raised);
     --color-primary: var(--primary);
     --color-primary-foreground: var(--primary-foreground);
     --color-secondary: var(--secondary);
@@ -61,15 +77,256 @@
     --color-accent-foreground: var(--accent-foreground);
     --color-destructive: var(--destructive);
     --color-destructive-foreground: var(--destructive-foreground);
+    --color-warning: var(--warning);
+    --color-warning-foreground: var(--warning-foreground);
+    --color-success: var(--success);
+    --color-success-foreground: var(--success-foreground);
     --color-border: var(--border);
     --color-input: var(--input);
     --color-ring: var(--ring);
+    --color-grid-line: var(--grid-line);
+    --color-agent-orchestrator: var(--agent-orchestrator);
+    --color-agent-knowledge: var(--agent-knowledge);
+    --color-agent-research: var(--agent-research);
     --radius-lg: var(--radius);
     --radius-md: calc(var(--radius) - 2px);
     --radius-sm: calc(var(--radius) - 4px);
+    --font-sans: "Space Grotesk Variable", system-ui, sans-serif;
+    --font-display: "Orbitron", "Space Grotesk Variable", sans-serif;
+    --font-mono: "JetBrains Mono Variable", ui-monospace, monospace;
 }
 
 body {
     background-color: var(--background);
     color: var(--foreground);
+    font-family: var(--font-sans);
+    overflow: hidden; /* desktop shell: pages scroll internally */
+}
+
+::selection {
+    background: oklch(0.8 0.125 210 / 30%);
+}
+
+/* Thin HUD scrollbars (WebKit-based webviews) */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+::-webkit-scrollbar-thumb {
+    background: oklch(0.75 0.08 215 / 25%);
+    border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: oklch(0.8 0.125 210 / 45%);
+}
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+/* ============================================================================
+   HUD utility classes — the visual vocabulary of the app.
+   Defined with @utility so Tailwind variants (hover:, focus-visible:) apply.
+   ========================================================================== */
+
+/* Near-opaque panel with a fine cyan-tinted edge. Deliberately no
+   backdrop-blur: these stack heavily (every chat message, card, tile) and
+   blurring each one is the main compositing cost. Chrome surfaces that DO
+   want glass add `backdrop-blur-sm` themselves. */
+@utility hud-panel {
+    background: color-mix(in oklab, var(--card) 92%, transparent);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+}
+
+/* Corner brackets (all four), drawn with background gradients so the
+   class stacks with hud-panel. Tint via --corner-color. */
+@utility hud-corners {
+    --corner-color: oklch(0.8 0.125 210 / 55%);
+    --corner-size: 10px;
+    background-image:
+        linear-gradient(var(--corner-color), var(--corner-color)),
+        linear-gradient(var(--corner-color), var(--corner-color)),
+        linear-gradient(var(--corner-color), var(--corner-color)),
+        linear-gradient(var(--corner-color), var(--corner-color)),
+        linear-gradient(var(--corner-color), var(--corner-color)),
+        linear-gradient(var(--corner-color), var(--corner-color)),
+        linear-gradient(var(--corner-color), var(--corner-color)),
+        linear-gradient(var(--corner-color), var(--corner-color));
+    background-repeat: no-repeat;
+    background-size:
+        var(--corner-size) 1px,
+        1px var(--corner-size),
+        var(--corner-size) 1px,
+        1px var(--corner-size),
+        var(--corner-size) 1px,
+        1px var(--corner-size),
+        var(--corner-size) 1px,
+        1px var(--corner-size);
+    background-position:
+        top left,
+        top left,
+        top right,
+        top right,
+        bottom left,
+        bottom left,
+        bottom right,
+        bottom right;
+}
+
+@utility glow {
+    box-shadow: 0 0 16px var(--glow);
+}
+@utility glow-sm {
+    box-shadow: 0 0 8px var(--glow);
+}
+@utility text-glow {
+    text-shadow: 0 0 10px var(--glow);
+}
+
+/* Faint blueprint grid, used by GridBackground */
+@utility hud-grid {
+    background-image:
+        linear-gradient(var(--grid-line) 1px, transparent 1px),
+        linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+    background-size: 32px 32px;
+}
+
+/* Indeterminate shimmer for in-flight tool/activity rows */
+@utility shimmer {
+    background: linear-gradient(
+        100deg,
+        transparent 30%,
+        oklch(0.8 0.125 210 / 12%) 50%,
+        transparent 70%
+    );
+    background-size: 250% 100%;
+    animation: shimmer-slide 1.6s linear infinite;
+}
+
+@utility animate-pulse-core {
+    animation: pulse-core 2.4s var(--ease-out-expo) infinite;
+}
+
+@keyframes shimmer-slide {
+    from {
+        background-position: 200% 0;
+    }
+    to {
+        background-position: -50% 0;
+    }
+}
+
+@keyframes pulse-core {
+    0%,
+    100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+    50% {
+        opacity: 0.55;
+        transform: scale(0.92);
+    }
+}
+
+/* Rendered markdown (notes preview). Tailwind's reset strips element defaults,
+   so restore readable prose styling using theme tokens. */
+.markdown {
+    line-height: 1.65;
+    word-break: break-word;
+}
+.markdown > :first-child {
+    margin-top: 0;
+}
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4 {
+    font-weight: 600;
+    line-height: 1.3;
+    margin: 1.2em 0 0.5em;
+}
+.markdown h1 {
+    font-size: 1.5em;
+}
+.markdown h2 {
+    font-size: 1.3em;
+}
+.markdown h3 {
+    font-size: 1.1em;
+}
+.markdown p,
+.markdown ul,
+.markdown ol,
+.markdown blockquote,
+.markdown pre,
+.markdown table {
+    margin: 0.6em 0;
+}
+.markdown ul,
+.markdown ol {
+    padding-left: 1.4em;
+}
+.markdown ul {
+    list-style: disc;
+}
+.markdown ol {
+    list-style: decimal;
+}
+.markdown li {
+    margin: 0.2em 0;
+}
+.markdown a {
+    color: var(--primary);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+.markdown code {
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+    background: var(--muted);
+    border-radius: var(--radius-sm);
+    padding: 0.1em 0.35em;
+}
+.markdown pre {
+    background: var(--muted);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0.75em 1em;
+    overflow-x: auto;
+}
+.markdown pre code {
+    background: transparent;
+    padding: 0;
+}
+.markdown blockquote {
+    border-left: 2px solid var(--primary);
+    padding-left: 1em;
+    color: var(--muted-foreground);
+}
+.markdown h1,
+.markdown h2 {
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0.2em;
+}
+.markdown hr {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 1.2em 0;
+}
+.markdown table {
+    border-collapse: collapse;
+}
+.markdown th,
+.markdown td {
+    border: 1px solid var(--border);
+    padding: 0.4em 0.7em;
+}
+
+/* Ambient/looping motion is decoration — kill it for reduced-motion users.
+   One-shot enter/exit transitions (motion lib) honor this via useReducedMotion. */
+@media (prefers-reduced-motion: reduce) {
+    .shimmer,
+    .animate-pulse-core {
+        animation: none !important;
+    }
 }

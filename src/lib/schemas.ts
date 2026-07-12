@@ -81,6 +81,18 @@ export const chatMessageSchema = z.object({
 });
 export type ChatMessage = z.infer<typeof chatMessageSchema>;
 
+export const noteSchema = z.object({
+    id: z.string(),
+    title: z.string(),
+    folder: z.string(),
+    body_md: z.string(),
+    created_at: z.number(),
+    updated_at: z.number(),
+});
+export type Note = z.infer<typeof noteSchema>;
+/** Note without its body — for list views. */
+export type NoteSummary = Omit<Note, "body_md">;
+
 export const documentSchema = z.object({
     id: z.string(),
     title: z.string(),

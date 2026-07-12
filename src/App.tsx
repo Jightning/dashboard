@@ -2,7 +2,23 @@ import { useCallback, useEffect, useState } from "react";
 import { Shell } from "./app/Shell";
 import { bootstrap, type BootResult } from "./app/bootstrap";
 import { RuntimeContext } from "./app/runtime";
+import { NeuralCore } from "@/components/hud/NeuralCore";
+import { Typewriter } from "@/components/hud/Typewriter";
 import type { Settings } from "@/ai/providers/keys";
+
+function BootScreen() {
+    return (
+        <div className="flex h-screen flex-col items-center justify-center gap-5">
+            <NeuralCore size={260} state="thinking" />
+            <div className="font-display text-glow text-xl font-bold tracking-[0.25em] text-primary">
+                Hugh
+            </div>
+            <div className="h-4 font-mono text-[11px] uppercase tracking-[0.2em] text-muted-foreground">
+                <Typewriter text="migrating db · loading keys · linking providers" />
+            </div>
+        </div>
+    );
+}
 
 export default function App() {
     const [boot, setBoot] = useState<BootResult | null>(null);
@@ -28,22 +44,27 @@ export default function App() {
     if (error) {
         return (
             <div className="flex h-screen items-center justify-center p-8">
-                <div className="max-w-lg rounded-md border border-destructive p-4 text-sm">
-                    <div className="mb-1 font-semibold text-destructive">
-                        Startup failed
+                <div
+                    className="hud-panel hud-corners max-w-lg p-5 text-sm"
+                    style={
+                        {
+                            "--corner-color": "var(--destructive)",
+                            borderColor:
+                                "color-mix(in oklab, var(--destructive) 50%, transparent)",
+                        } as React.CSSProperties
+                    }
+                >
+                    <div className="mb-2 font-mono text-[10px] uppercase tracking-[0.2em] text-destructive">
+                        startup failure
                     </div>
-                    {error}
+                    <div className="font-mono text-xs">{error}</div>
                 </div>
             </div>
         );
     }
 
     if (!boot || !settings) {
-        return (
-            <div className="flex h-screen items-center justify-center text-sm text-muted-foreground">
-                Starting…
-            </div>
-        );
+        return <BootScreen />;
     }
 
     return (

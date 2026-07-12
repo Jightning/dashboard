@@ -4,6 +4,7 @@ import { setDb } from "./client";
 import * as sessions from "./repo/sessions";
 import * as messages from "./repo/messages";
 import * as documents from "./repo/documents";
+import * as notes from "./repo/notes";
 import * as permissions from "./repo/permissions";
 import * as presets from "./repo/presets";
 
@@ -154,6 +155,48 @@ describe("documents + FTS5", () => {
         const inSchool = await documents.listDocuments("/school");
         expect(inSchool).toHaveLength(1);
         expect(inSchool[0]?.title).toBe("a");
+    });
+});
+
+describe("notes + FTS5", () => {
+    it("does CRUD and finds notes through the FTS index with snippets", async () => {
+        const note = await notes.createNote({
+            title: "Lecture 3",
+            folder: "/school/ece",
+            bodyMd: "# Op-amps\nThe golden rules of ideal operational amplifiers.",
+        });
+        await notes.createNote({ title: "Empty" });
+
+        expect((await notes.getNote(note.id)).body_md).toContain("golden");
+
+        const hits = await notes.searchNotes("operational amplifiers");
+        expect(hits).toHaveLength(1);
+        expect(hits[0]?.title).toBe("Lecture 3");
+        expect(hits[0]?.snippet).toContain("[operational]");
+    });
+
+    it("keeps the FTS index in sync on update and delete (triggers)", async () => {
+        const note = await notes.createNote({ bodyMd: "original alpha term" });
+
+        await notes.updateNote(note.id, {
+            title: "Renamed",
+            folder: "/",
+            bodyMd: "replacement beta term",
+        });
+        expect(await notes.searchNotes("alpha")).toHaveLength(0);
+        expect(await notes.searchNotes("beta")).toHaveLength(1);
+
+        await notes.deleteNote(note.id);
+        expect(await notes.searchNotes("beta")).toHaveLength(0);
+    });
+
+    it("lists notes scoped to a folder without body content", async () => {
+        await notes.createNote({ title: "a", folder: "/school/ece" });
+        await notes.createNote({ title: "b", folder: "/personal" });
+        const inSchool = await notes.listNotes("/school");
+        expect(inSchool).toHaveLength(1);
+        expect(inSchool[0]?.title).toBe("a");
+        expect("body_md" in inSchool[0]!).toBe(false);
     });
 });
 

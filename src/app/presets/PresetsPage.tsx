@@ -9,6 +9,7 @@ import {
     type Preset,
 } from "@/lib/schemas";
 import { PROVIDERS, type ProviderId } from "@/ai/providers/registry";
+import { availableProviders } from "@/lib/env";
 import { Button } from "@/components/ui/button";
 import { Input, Textarea } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
@@ -33,11 +34,16 @@ export function PresetsPage() {
     return (
         <div className="h-full overflow-y-auto p-6">
             <div className="mx-auto flex max-w-2xl flex-col gap-4">
-                <div className="text-sm text-muted-foreground">
-                    A preset bundles a system prompt, models, agents, a
-                    permission level, and a token budget. Pick one when starting
-                    a chat.
-                </div>
+                <header>
+                    <h1 className="font-display text-2xl font-bold tracking-wide">
+                        Context presets
+                    </h1>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                        A preset bundles a system prompt, models, agents, a
+                        permission level, and a token budget. Pick one when
+                        starting a chat.
+                    </p>
+                </header>
 
                 {presets.map((p) => (
                     <Card key={p.id}>
@@ -200,11 +206,21 @@ function PresetForm({
                                 })
                             }
                         >
-                            {Object.entries(PROVIDERS).map(([id, p]) => (
-                                <option key={id} value={id}>
-                                    {p.label}
-                                </option>
-                            ))}
+                            {Object.entries(PROVIDERS).map(([id, p]) => {
+                                const available = availableProviders().includes(
+                                    id as ProviderId,
+                                );
+                                return (
+                                    <option
+                                        key={id}
+                                        value={id}
+                                        disabled={!available}
+                                    >
+                                        {p.label}
+                                        {!available && " (desktop only)"}
+                                    </option>
+                                );
+                            })}
                         </Select>
                     </label>
                     <label className="flex flex-1 flex-col gap-1 text-sm">

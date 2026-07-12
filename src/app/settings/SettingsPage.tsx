@@ -6,6 +6,7 @@ import {
     SUGGESTED_MODELS,
     type ProviderId,
 } from "@/ai/providers/registry";
+import { availableProviders } from "@/lib/env";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
@@ -30,6 +31,14 @@ export function SettingsPage() {
     return (
         <div className="h-full overflow-y-auto p-6">
             <div className="mx-auto flex max-w-xl flex-col gap-4">
+                <header>
+                    <h1 className="font-display text-2xl font-bold tracking-wide">
+                        Settings
+                    </h1>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                        Providers, keys, and default models.
+                    </p>
+                </header>
                 <Card>
                     <CardHeader>
                         <CardTitle>API keys</CardTitle>
@@ -105,11 +114,21 @@ export function SettingsPage() {
                                     )
                                 }
                             >
-                                {Object.entries(PROVIDERS).map(([id, p]) => (
-                                    <option key={id} value={id}>
-                                        {p.label}
-                                    </option>
-                                ))}
+                                {Object.entries(PROVIDERS).map(([id, p]) => {
+                                    const available = availableProviders().includes(
+                                        id as ProviderId,
+                                    );
+                                    return (
+                                        <option
+                                            key={id}
+                                            value={id}
+                                            disabled={!available}
+                                        >
+                                            {p.label}
+                                            {!available && " (desktop only)"}
+                                        </option>
+                                    );
+                                })}
                             </Select>
                         </label>
                         <label className="flex flex-col gap-1 text-sm">
@@ -143,8 +162,8 @@ export function SettingsPage() {
                 <div className="flex items-center gap-3">
                     <Button onClick={save}>Save</Button>
                     {saved && (
-                        <span className="text-xs text-muted-foreground">
-                            Saved.
+                        <span className="font-mono text-xs uppercase tracking-wider text-success">
+                            saved
                         </span>
                     )}
                 </div>

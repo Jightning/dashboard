@@ -1,3 +1,4 @@
+import { Meter } from "@/components/ui/meter";
 import type { SessionUsageTotals } from "@/db/repo/messages";
 
 export function TokenMeter({
@@ -14,24 +15,20 @@ export function TokenMeter({
 
     return (
         <div
-            className="flex items-center gap-2 text-xs text-muted-foreground"
+            className="flex items-center gap-2 font-mono text-[11px] text-muted-foreground"
             title={`in ${totals.inputTokens.toLocaleString()} · out ${totals.outputTokens.toLocaleString()} · cached ${totals.cachedInputTokens.toLocaleString()}`}
         >
             <span>
                 {used.toLocaleString()}
-                {budget ? ` / ${budget.toLocaleString()}` : ""} tokens
+                {budget ? ` / ${budget.toLocaleString()}` : ""} tok
             </span>
             {pct !== null && (
-                <span className="h-1.5 w-16 overflow-hidden rounded bg-muted">
-                    <span
-                        className={
-                            pct > 90
-                                ? "block h-full bg-destructive"
-                                : "block h-full bg-primary"
-                        }
-                        style={{ width: `${pct}%` }}
-                    />
-                </span>
+                <Meter
+                    pct={pct}
+                    segments={16}
+                    className="w-24"
+                    label="token budget used"
+                />
             )}
         </div>
     );

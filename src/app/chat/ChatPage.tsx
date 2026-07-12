@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { AgentName } from "@/lib/schemas";
+import { presetAgents } from "@/lib/schemas";
 import { useChat } from "@ai-sdk/react";
 import type { UIMessage } from "ai";
-import { Plus } from "lucide-react";
+import { Shield } from "lucide-react";
 import { useRuntime } from "@/app/runtime";
 import { tauriFetch } from "@/ai/providers/tauriFetch";
+import { isTauri } from "@/lib/env";
 import { applyPermissionLevel, buildSessionAgent } from "@/ai/agents/runtime";
 import {
     createModel,
@@ -28,8 +31,19 @@ import { MessageList } from "@/components/chat/MessageList";
 import { Composer } from "@/components/chat/Composer";
 import { ApprovalCards } from "@/components/chat/ApprovalCard";
 import { TokenMeter } from "@/components/chat/TokenMeter";
-import { Button } from "@/components/ui/button";
+import { NetworkSphere } from "@/components/hud/NetworkSphere";
+import {
+    buildAgentTypeNetwork,
+    buildSessionNetwork,
+} from "@/components/hud/networkData";
+import { Typewriter } from "@/components/hud/Typewriter";
 import { Select } from "@/components/ui/select";
+import { InstancesSidebar } from "./InstancesSidebar";
+
+// Only Tauri routes provider calls through Rust (dodges browser CORS); a
+// plain browser tab uses the global fetch, bound so it isn't called detached
+// from `window` (some engines throw "Illegal invocation" otherwise).
+const appFetch = isTauri() ? tauriFetch : globalThis.fetch.bind(globalThis);
 
 interface ActiveChat {
     session: ChatSession;
@@ -46,6 +60,10 @@ export function ChatPage() {
     const [levels, setLevels] = useState<PermissionLevel[]>([]);
     const [active, setActive] = useState<ActiveChat | null>(null);
     const [error, setError] = useState<string | null>(null);
+    // Session id highlighted by hovering a sphere node or a sidebar row.
+    const [hoveredInstanceId, setHoveredInstanceId] = useState<string | null>(
+        null,
+    );
 
     useEffect(() => {
         void (async () => {
@@ -68,7 +86,7 @@ export function ChatPage() {
                         preset,
                         settings,
                         permissionLevelId: session.permission_level_id,
-                        fetch: tauriFetch,
+                        fetch: appFetch,
                         onUsage: collector.collect,
                     });
                 const rows = await messagesRepo.listActiveMessages(session.id);
@@ -105,52 +123,120 @@ export function ChatPage() {
         [openSession],
     );
 
+    // No chat selected → a network of existing sessions (agent instances); with
+    // none yet, the static agent-type topology as an intro.
+    const network = useMemo(
+        () =>
+            sessions.length
+                ? buildSessionNetwork(sessions, presets)
+                : buildAgentTypeNetwork(),
+        [sessions, presets],
+    );
+
+    const openFromNode = useCallback(
+        (node: { kind: string; payload?: unknown }) => {
+            if (node.kind === "session") {
+                void openSession(node.payload as ChatSession);
+                return;
+            }
+            // Fallback (no sessions yet): start a chat with a preset that
+            // enables the clicked agent.
+            const agent = (node.payload as { agent?: string } | undefined)
+                ?.agent;
+            if (!agent) return;
+            const preset =
+                presets.find((p) => {
+                    try {
+                        return presetAgents(p).includes(agent as AgentName);
+                    } catch {
+                        return false;
+                    }
+                }) ?? presets[0];
+            if (preset) void newChat(preset);
+        },
+        [openSession, newChat, presets],
+    );
+
+    const deleteInstance = useCallback(async (session: ChatSession) => {
+        setError(null);
+        try {
+            await sessionsRepo.deleteSession(session.id);
+            setSessions(await sessionsRepo.listSessions());
+            setActive((cur) => (cur?.session.id === session.id ? null : cur));
+        } catch (e) {
+            setError(e instanceof Error ? e.message : String(e));
+        }
+    }, []);
+
     return (
-        <div className="flex h-full flex-col">
-            <header className="flex items-center gap-3 border-b border-border px-4 py-2">
-                <Select
-                    value={active?.session.id ?? ""}
-                    onChange={(e) => {
-                        const s = sessions.find((x) => x.id === e.target.value);
-                        if (s) void openSession(s);
-                    }}
-                >
-                    <option value="" disabled>
-                        {sessions.length ? "Open a chat…" : "No chats yet"}
-                    </option>
-                    {sessions.map((s) => (
-                        <option key={s.id} value={s.id}>
-                            {s.title}
-                        </option>
-                    ))}
-                </Select>
-                {active && <LevelDropdown active={active} levels={levels} />}
-                <div className="flex-1" />
-                {presets.map((p) => (
-                    <Button
-                        key={p.id}
-                        size="sm"
-                        variant="outline"
-                        onClick={() => void newChat(p)}
-                    >
-                        <Plus className="h-3 w-3" /> {p.name}
-                    </Button>
-                ))}
-            </header>
+        <div className="flex h-full">
+            <InstancesSidebar
+                sessions={sessions}
+                presets={presets}
+                levels={levels}
+                activeId={active?.session.id ?? null}
+                highlightId={hoveredInstanceId}
+                onOpen={(s) => void openSession(s)}
+                onDelete={(s) => void deleteInstance(s)}
+                onHover={setHoveredInstanceId}
+                onNewChat={(p) => void newChat(p)}
+            />
 
-            {error && (
-                <div className="p-3 text-sm text-destructive">{error}</div>
-            )}
+            <div className="flex min-w-0 flex-1 flex-col">
+                {active && (
+                    <header className="flex items-center gap-3 border-b border-border bg-background/85 px-4 py-2">
+                        <LevelDropdown active={active} levels={levels} />
+                    </header>
+                )}
 
-            {active ? (
-                <ActiveChatView key={active.session.id} active={active} />
-            ) : (
-                <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-                    Start a new chat with a preset, or open an existing one.
-                </div>
-            )}
+                {error && (
+                    <div className="mx-4 mt-3 rounded-md border border-destructive/50 bg-destructive/10 p-3 font-mono text-xs text-destructive">
+                        {error}
+                    </div>
+                )}
+
+                {active ? (
+                    <ActiveChatView key={active.session.id} active={active} />
+                ) : (
+                    <div className="flex flex-1 flex-col items-center justify-center gap-3">
+                        <NetworkSphere
+                            nodes={network.nodes}
+                            edges={network.edges}
+                            size={320}
+                            onSelect={openFromNode}
+                            onHover={(node) =>
+                                setHoveredInstanceId(sessionIdOf(node))
+                            }
+                            highlightId={
+                                hoveredInstanceId
+                                    ? `session:${hoveredInstanceId}`
+                                    : null
+                            }
+                        />
+                        <div className="font-mono text-sm uppercase tracking-[0.2em] text-primary text-glow">
+                            <Typewriter text="standing by" />
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                            {sessions.length
+                                ? "Hover a node or row to link them · click to open."
+                                : "Start an agent from a preset in the sidebar."}
+                        </p>
+                    </div>
+                )}
+            </div>
         </div>
     );
+}
+
+/** Map a hovered network node to the session (instance) it belongs to. */
+function sessionIdOf(
+    node: { kind: string; payload?: unknown; parentId?: string } | null,
+): string | null {
+    if (!node) return null;
+    if (node.kind === "session") return (node.payload as ChatSession).id;
+    if (node.parentId?.startsWith("session:"))
+        return node.parentId.slice("session:".length);
+    return null;
 }
 
 function LevelDropdown({
@@ -174,10 +260,11 @@ function LevelDropdown({
     };
 
     return (
-        <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <label className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+            <Shield aria-hidden className="h-3.5 w-3.5 text-primary/70" />
             Permissions
             <Select
-                className="h-8"
+                className="h-8 font-mono text-xs normal-case tracking-normal"
                 value={levelId}
                 onChange={(e) => void change(e.target.value)}
             >
@@ -239,7 +326,7 @@ function ActiveChatView({ active }: { active: ActiveChat }) {
               transcribeAudio({
                   model: createModel(
                       { provider: "google", modelId: "gemini-2.5-flash" },
-                      { settings, fetch: tauriFetch },
+                      { settings, fetch: appFetch },
                   ),
                   audio,
               })
@@ -248,7 +335,7 @@ function ActiveChatView({ active }: { active: ActiveChat }) {
     return (
         <>
             <div className="flex items-center justify-between px-4 py-1.5">
-                <span className="text-xs text-muted-foreground">
+                <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
                     {active.preset.name} · {active.preset.provider}/
                     {active.preset.model}
                 </span>
@@ -257,7 +344,7 @@ function ActiveChatView({ active }: { active: ActiveChat }) {
                     budget={active.preset.token_budget}
                 />
             </div>
-            <MessageList messages={messages} />
+            <MessageList messages={messages} busy={busy} />
             <div className="px-4 pb-2">
                 <ApprovalCards broker={active.permissions.broker} />
             </div>

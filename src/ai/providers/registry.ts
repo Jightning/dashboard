@@ -4,6 +4,7 @@ import { createOpenAI } from "@ai-sdk/openai";
 import { createOllama } from "ai-sdk-ollama";
 import type { LanguageModel } from "ai";
 import type { Settings } from "./keys";
+import { isWebBrowser, WEB_ALLOWED_PROVIDERS } from "@/lib/env";
 
 export type ProviderId = "google" | "anthropic" | "openai" | "ollama";
 
@@ -41,6 +42,12 @@ export function createModel(
     runtime: ProviderRuntime,
 ): LanguageModel {
     const { settings, fetch } = runtime;
+    if (isWebBrowser() && !WEB_ALLOWED_PROVIDERS.includes(ref.provider)) {
+        throw new Error(
+            `Provider '${ref.provider}' requires the desktop app (browser CORS blocks it). ` +
+                `Switch to Google Gemini or Ollama, or use the Tauri build.`,
+        );
+    }
     switch (ref.provider) {
         case "google": {
             requireKey(settings.googleApiKey, "google");

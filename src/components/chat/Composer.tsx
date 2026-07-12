@@ -1,10 +1,17 @@
 import { useRef, useState } from "react";
-import { Mic, Paperclip, SendHorizonal, Square, X } from "lucide-react";
+import {
+    Image as ImageIcon,
+    Mic,
+    Paperclip,
+    SendHorizonal,
+    Square,
+    X,
+} from "lucide-react";
 import type { FileUIPart } from "ai";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/input";
 import { fileToImagePart } from "@/ai/multimodal/image";
 import { MicRecorder } from "@/ai/multimodal/stt";
+import { cn } from "@/lib/utils";
 
 export function Composer({
     disabled,
@@ -100,117 +107,127 @@ export function Composer({
         .join(",");
 
     return (
-        <div className="border-t border-border">
-            {(images.length > 0 || notice) && (
-                <div className="flex flex-wrap items-center gap-2 px-3 pt-2">
-                    {images.map((img, i) => (
-                        <span
-                            key={i}
-                            className="flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-xs"
-                        >
-                            🖼 {img.filename ?? "image"}
-                            <button
-                                aria-label="Remove attachment"
-                                onClick={() =>
-                                    setImages((prev) =>
-                                        prev.filter((_, j) => j !== i),
-                                    )
-                                }
+        <div className="px-4 pb-4 pt-1">
+            <div className="hud-panel hud-corners mx-auto max-w-3xl">
+                {(images.length > 0 || notice) && (
+                    <div className="flex flex-wrap items-center gap-2 px-3 pt-2">
+                        {images.map((img, i) => (
+                            <span
+                                key={i}
+                                className="flex items-center gap-1.5 rounded-sm border border-primary/40 bg-primary/10 px-1.5 py-0.5 font-mono text-xs text-primary"
                             >
-                                <X className="h-3 w-3" />
-                            </button>
-                        </span>
-                    ))}
-                    {notice && (
-                        <span className="text-xs text-destructive">
-                            {notice}
-                        </span>
+                                <ImageIcon aria-hidden className="h-3 w-3" />
+                                {img.filename ?? "image"}
+                                <button
+                                    aria-label="Remove attachment"
+                                    className="cursor-pointer hover:text-foreground"
+                                    onClick={() =>
+                                        setImages((prev) =>
+                                            prev.filter((_, j) => j !== i),
+                                        )
+                                    }
+                                >
+                                    <X className="h-3 w-3" />
+                                </button>
+                            </span>
+                        ))}
+                        {notice && (
+                            <span className="font-mono text-xs text-destructive">
+                                {notice}
+                            </span>
+                        )}
+                    </div>
+                )}
+                <div className="flex items-end gap-1.5 p-2">
+                    {attachAccept && (
+                        <>
+                            <input
+                                ref={fileInputRef}
+                                type="file"
+                                hidden
+                                multiple
+                                accept={attachAccept}
+                                onChange={(e) => {
+                                    void handleFiles(e.target.files);
+                                    e.target.value = "";
+                                }}
+                            />
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                aria-label="Attach image or PDF"
+                                disabled={disabled}
+                                onClick={() => fileInputRef.current?.click()}
+                            >
+                                <Paperclip className="h-4 w-4" />
+                            </Button>
+                        </>
+                    )}
+                    {transcriber && (
+                        <Button
+                            variant={recording ? "destructive" : "ghost"}
+                            size="icon"
+                            className={cn(
+                                recording &&
+                                    "animate-pulse-core shadow-[0_0_14px_var(--destructive)]",
+                            )}
+                            aria-label={
+                                recording
+                                    ? "Stop recording"
+                                    : "Record voice input"
+                            }
+                            disabled={disabled || transcribing}
+                            onClick={() => void toggleMic()}
+                        >
+                            <Mic className="h-4 w-4" />
+                        </Button>
+                    )}
+                    <textarea
+                        rows={2}
+                        className="flex-1 resize-none bg-transparent px-2 py-1.5 text-sm placeholder:text-muted-foreground focus-visible:outline-none disabled:opacity-50"
+                        placeholder={
+                            disabled
+                                ? "Start a chat first"
+                                : transcribing
+                                  ? "Transcribing…"
+                                  : "Issue a directive… (Enter to send)"
+                        }
+                        value={text}
+                        disabled={disabled}
+                        onChange={(e) => setText(e.target.value)}
+                        onPaste={(e) => {
+                            if (e.clipboardData.files.length > 0) {
+                                e.preventDefault();
+                                void handleFiles(e.clipboardData.files);
+                            }
+                        }}
+                        onKeyDown={(e) => {
+                            if (e.key === "Enter" && !e.shiftKey) {
+                                e.preventDefault();
+                                submit();
+                            }
+                        }}
+                    />
+                    {busy ? (
+                        <Button
+                            variant="destructive"
+                            size="icon"
+                            aria-label="Stop"
+                            onClick={onStop}
+                        >
+                            <Square className="h-4 w-4" />
+                        </Button>
+                    ) : (
+                        <Button
+                            size="icon"
+                            aria-label="Send"
+                            onClick={submit}
+                            disabled={disabled}
+                        >
+                            <SendHorizonal className="h-4 w-4" />
+                        </Button>
                     )}
                 </div>
-            )}
-            <div className="flex items-end gap-2 p-3">
-                {attachAccept && (
-                    <>
-                        <input
-                            ref={fileInputRef}
-                            type="file"
-                            hidden
-                            multiple
-                            accept={attachAccept}
-                            onChange={(e) => {
-                                void handleFiles(e.target.files);
-                                e.target.value = "";
-                            }}
-                        />
-                        <Button
-                            variant="ghost"
-                            size="icon"
-                            aria-label="Attach image or PDF"
-                            disabled={disabled}
-                            onClick={() => fileInputRef.current?.click()}
-                        >
-                            <Paperclip className="h-4 w-4" />
-                        </Button>
-                    </>
-                )}
-                {transcriber && (
-                    <Button
-                        variant={recording ? "destructive" : "ghost"}
-                        size="icon"
-                        aria-label={
-                            recording ? "Stop recording" : "Record voice input"
-                        }
-                        disabled={disabled || transcribing}
-                        onClick={() => void toggleMic()}
-                    >
-                        <Mic className="h-4 w-4" />
-                    </Button>
-                )}
-                <Textarea
-                    rows={2}
-                    className="flex-1 resize-none"
-                    placeholder={
-                        disabled
-                            ? "Start a chat first"
-                            : transcribing
-                              ? "Transcribing…"
-                              : "Message… (Enter to send)"
-                    }
-                    value={text}
-                    disabled={disabled}
-                    onChange={(e) => setText(e.target.value)}
-                    onPaste={(e) => {
-                        if (e.clipboardData.files.length > 0) {
-                            e.preventDefault();
-                            void handleFiles(e.clipboardData.files);
-                        }
-                    }}
-                    onKeyDown={(e) => {
-                        if (e.key === "Enter" && !e.shiftKey) {
-                            e.preventDefault();
-                            submit();
-                        }
-                    }}
-                />
-                {busy ? (
-                    <Button
-                        variant="destructive"
-                        size="icon"
-                        aria-label="Stop"
-                        onClick={onStop}
-                    >
-                        <Square className="h-4 w-4" />
-                    </Button>
-                ) : (
-                    <Button
-                        size="icon"
-                        aria-label="Send"
-                        onClick={submit}
-                        disabled={disabled}
-                    >
-                        <SendHorizonal className="h-4 w-4" />
-                    </Button>
-                )}
             </div>
         </div>
     );

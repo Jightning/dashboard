@@ -1,11 +1,17 @@
 import type { HTMLAttributes } from "react";
 import { cn } from "@/lib/utils";
 
-export function Card({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
+export interface CardProps extends HTMLAttributes<HTMLDivElement> {
+    /** Draw HUD corner brackets on the panel edge. */
+    corners?: boolean;
+}
+
+export function Card({ className, corners, ...props }: CardProps) {
     return (
         <div
             className={cn(
-                "rounded-lg border border-border bg-card text-card-foreground",
+                "hud-panel text-card-foreground",
+                corners && "hud-corners",
                 className,
             )}
             {...props}
@@ -28,7 +34,10 @@ export function CardTitle({
 }: HTMLAttributes<HTMLDivElement>) {
     return (
         <div
-            className={cn("font-semibold leading-none", className)}
+            className={cn(
+                "font-semibold leading-none tracking-wide",
+                className,
+            )}
             {...props}
         />
     );
