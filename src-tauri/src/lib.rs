@@ -20,6 +20,12 @@ pub fn migrations() -> Vec<Migration> {
             sql: include_str!("../migrations/0003_agents.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 4,
+            description: "pipelines, steps, run history",
+            sql: include_str!("../migrations/0004_pipelines.sql"),
+            kind: MigrationKind::Up,
+        },
     ]
 }
 

@@ -136,3 +136,50 @@ export const documentSchema = z.object({
     created_at: z.number(),
 });
 export type Document = z.infer<typeof documentSchema>;
+
+export const pipelineSchema = z.object({
+    id: z.string(),
+    name: z.string(),
+    description: z.string().nullable(),
+    created_at: z.number(),
+    updated_at: z.number(),
+});
+export type Pipeline = z.infer<typeof pipelineSchema>;
+
+export const pipelineStepSchema = z.object({
+    id: z.string(),
+    pipeline_id: z.string(),
+    position: z.number(),
+    agent_id: z.string(),
+    prompt_template: z.string(),
+});
+export type PipelineStep = z.infer<typeof pipelineStepSchema>;
+
+export const runStatusSchema = z.enum(["running", "success", "error"]);
+export type RunStatus = z.infer<typeof runStatusSchema>;
+
+export const pipelineRunSchema = z.object({
+    id: z.string(),
+    pipeline_id: z.string(),
+    automation_id: z.string().nullable(),
+    status: runStatusSchema,
+    input: z.string(),
+    error: z.string().nullable(),
+    started_at: z.number(),
+    finished_at: z.number().nullable(),
+});
+export type PipelineRun = z.infer<typeof pipelineRunSchema>;
+
+export const pipelineStepRunSchema = z.object({
+    id: z.string(),
+    run_id: z.string(),
+    position: z.number(),
+    agent_id: z.string(),
+    prompt: z.string(),
+    output: z.string().nullable(),
+    status: runStatusSchema,
+    error: z.string().nullable(),
+    started_at: z.number(),
+    finished_at: z.number().nullable(),
+});
+export type PipelineStepRun = z.infer<typeof pipelineStepRunSchema>;
