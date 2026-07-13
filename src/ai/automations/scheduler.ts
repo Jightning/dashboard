@@ -31,12 +31,12 @@ export function startAutomationScheduler(deps: {
         try {
             const due = await listDueAutomations(Date.now());
             for (const a of due) {
-                const t = Date.now();
-                await markRun(a.id, {
-                    nextRunAt: computeNextRun(a, t),
-                    lastRunAt: t,
-                });
                 try {
+                    const t = Date.now();
+                    await markRun(a.id, {
+                        nextRunAt: computeNextRun(a, t),
+                        lastRunAt: t,
+                    });
                     await run(a);
                 } catch (e) {
                     console.error(`automation "${a.name}" failed:`, e);

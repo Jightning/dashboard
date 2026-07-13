@@ -88,4 +88,50 @@ describe("automation scheduler", () => {
         );
         stop(); // no unhandled rejection = pass
     });
+
+    it("keeps ticking when claiming (markRun/computeNextRun) throws for one automation", async () => {
+        const p = await createPipeline({ name: "P3" });
+
+        // Broken: due first, but its interval is corrupted directly in the DB
+        // (bypassing createAutomation's own validation) so computeNextRun
+        // throws for it specifically during the claim step.
+        const broken = await createAutomation({
+            name: "Broken",
+            pipelineId: p.id,
+            scheduleKind: "interval",
+            intervalMinutes: 1,
+            inputTemplate: "",
+        });
+        await db.execute(
+            "UPDATE automations SET interval_minutes = 0, next_run_at = ? WHERE id = ?",
+            [Date.now() - 2000, broken.id],
+        );
+
+        // Healthy: due second (later next_run_at), should still run even
+        // though the broken automation's claim threw first.
+        const healthy = await createAutomation({
+            name: "Healthy",
+            pipelineId: p.id,
+            scheduleKind: "interval",
+            intervalMinutes: 1,
+            inputTemplate: "",
+        });
+        const { markRun } = await import("@/db/repo/automations");
+        await markRun(healthy.id, {
+            nextRunAt: Date.now() - 1000,
+            lastRunAt: 0,
+        });
+
+        const ran: string[] = [];
+        const stop = startAutomationScheduler({
+            settings: DEFAULT_SETTINGS,
+            fetch: async () => new Response("stub"),
+            tickMs: 5,
+            run: async (auto: Automation) => {
+                ran.push(auto.id);
+            },
+        });
+        await vi.waitFor(() => expect(ran).toEqual([healthy.id]));
+        stop(); // no unhandled rejection, and the healthy automation still ran
+    });
 });
