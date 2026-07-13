@@ -13,6 +13,10 @@ export function computeNextRun(a: Automation, from: number): number {
         case "daily":
             return nextAtTime(from, a.time_of_day, null);
         case "weekly":
+            if (a.day_of_week === null)
+                throw new Error(
+                    `weekly schedule requires day_of_week (0-6), got null (automation ${a.name})`,
+                );
             return nextAtTime(from, a.time_of_day, a.day_of_week);
     }
 }

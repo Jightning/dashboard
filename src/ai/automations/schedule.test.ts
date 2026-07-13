@@ -85,4 +85,17 @@ describe("computeNextRun", () => {
             ),
         ).toThrow(/time_of_day/);
     });
+
+    it("weekly: rejects missing day_of_week", () => {
+        expect(() =>
+            computeNextRun(
+                auto({
+                    schedule_kind: "weekly",
+                    time_of_day: "09:30",
+                    day_of_week: null,
+                }),
+                0,
+            ),
+        ).toThrow(/day_of_week/);
+    });
 });
