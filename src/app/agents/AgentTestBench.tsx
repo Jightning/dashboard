@@ -139,7 +139,7 @@ export function AgentTestBench({ agents }: { agents: AgentDef[] }) {
                 )}
                 {output !== null && (
                     <div
-                        className="prose prose-sm prose-invert max-w-none rounded-sm border border-border bg-background/60 p-3 text-sm"
+                        className="markdown rounded-sm border border-border bg-background/60 p-3 text-sm"
                         // Same marked config as NotesPage's markdown preview.
                         dangerouslySetInnerHTML={{
                             __html: marked.parse(output) as string,
