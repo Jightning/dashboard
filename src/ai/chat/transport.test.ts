@@ -88,6 +88,7 @@ function makeContext(opts: {
         mainModelId: opts.preset.model,
         routerModel: opts.model,
         routerModelId: opts.preset.model,
+        resolveModel: (modelId) => new MockLanguageModelV3({ modelId }),
         fetch: async () => new Response("stub"),
         onUsage: collector.collect,
     };

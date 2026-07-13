@@ -61,6 +61,7 @@ export function makeEvalRuntime(opts: {
         mainModelId: "eval-main",
         routerModel: opts.router,
         routerModelId: "eval-router",
+        resolveModel: () => opts.main,
         fetch: globalThis.fetch,
         asked,
     };
