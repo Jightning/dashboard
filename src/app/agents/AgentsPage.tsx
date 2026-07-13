@@ -9,6 +9,7 @@ import { agentColor } from "@/components/hud/AgentNode";
 import * as agentsRepo from "@/db/repo/agents";
 import { agentSlug, agentToolNames, type AgentDef } from "@/lib/schemas";
 import { AgentEditor } from "./AgentEditor";
+import { AgentTestBench } from "./AgentTestBench";
 import { cn } from "@/lib/utils";
 
 type Tab = "roster" | "pipelines" | "automations";
@@ -219,6 +220,7 @@ function RosterTab() {
                     New agent
                 </Button>
             )}
+            <AgentTestBench agents={agents} />
         </div>
     );
 }
