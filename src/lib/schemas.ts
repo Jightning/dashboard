@@ -183,3 +183,25 @@ export const pipelineStepRunSchema = z.object({
     finished_at: z.number().nullable(),
 });
 export type PipelineStepRun = z.infer<typeof pipelineStepRunSchema>;
+
+export const scheduleKindSchema = z.enum(["interval", "daily", "weekly"]);
+export type ScheduleKind = z.infer<typeof scheduleKindSchema>;
+
+export const automationSchema = z.object({
+    id: z.string(),
+    name: z.string(),
+    pipeline_id: z.string(),
+    schedule_kind: scheduleKindSchema,
+    interval_minutes: z.number().nullable(),
+    time_of_day: z.string().nullable(),
+    day_of_week: z.number().nullable(),
+    input_template: z.string(),
+    permission_level_id: z.string().nullable(),
+    output_note_folder: z.string().nullable(),
+    enabled: sqlBool,
+    next_run_at: z.number().nullable(),
+    last_run_at: z.number().nullable(),
+    created_at: z.number(),
+    updated_at: z.number(),
+});
+export type Automation = z.infer<typeof automationSchema>;

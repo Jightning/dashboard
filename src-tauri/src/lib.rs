@@ -26,6 +26,12 @@ pub fn migrations() -> Vec<Migration> {
             sql: include_str!("../migrations/0004_pipelines.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 5,
+            description: "automations",
+            sql: include_str!("../migrations/0005_automations.sql"),
+            kind: MigrationKind::Up,
+        },
     ]
 }
 
