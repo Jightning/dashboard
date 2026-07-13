@@ -178,6 +178,7 @@ export function PipelinesTab() {
 
             {editing ? (
                 <PipelineEditor
+                    key={editing === "new" ? "new" : editing.id}
                     pipeline={editing === "new" ? null : editing}
                     agents={agents}
                     onDone={async () => {
