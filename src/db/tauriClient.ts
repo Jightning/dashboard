@@ -3,6 +3,15 @@ import type { DbClient } from "./client";
 
 /** Loads the app database (migrations run on the Rust side before this resolves). */
 export async function createTauriDbClient(): Promise<DbClient> {
+    // Foreign-key enforcement (needed for the ON DELETE CASCADE chains in
+    // migrations 0001/0004/0005 — e.g. deleting a pipeline must cascade away its
+    // automations) is ON here without any explicit PRAGMA: tauri-plugin-sql 2.4
+    // runs on sqlx 0.8, whose SqliteConnectOptions default `foreign_keys` to ON
+    // and re-applies that pragma on every pooled connection at establish time
+    // (sqlx-sqlite options/mod.rs + options/connect.rs). Do NOT try to make this
+    // explicit by appending `?foreign_keys=on` to the URL — sqlx's connection-
+    // string parser only accepts mode/cache/immutable/vfs and hard-errors on any
+    // other query param, which would break DB startup entirely.
     const db = await Database.load("sqlite:dashboard.db");
 
     const client: DbClient = {
