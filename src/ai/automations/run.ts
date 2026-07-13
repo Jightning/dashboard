@@ -5,6 +5,8 @@ import { buildPipelineRuntime } from "@/ai/agents/runtime";
 import { runPipeline } from "@/ai/pipelines/runner";
 import { renderTemplate } from "@/lib/template";
 import { createNote } from "@/db/repo/notes";
+import { createRun, finishRun } from "@/db/repo/pipelines";
+import type { PipelineRunResult } from "@/ai/pipelines/runner";
 import type { Settings } from "@/ai/providers/keys";
 import type { Automation } from "@/lib/schemas";
 
@@ -38,15 +40,33 @@ export async function runAutomation(
         fetch: deps.fetch,
         permissions,
     });
-    const input = renderTemplate(a.input_template, {
-        date: new Date().toISOString().slice(0, 10),
-    });
-    const result = await runPipeline({
-        pipelineId: a.pipeline_id,
-        input,
-        runtime,
-        automationId: a.id,
-    });
+    // renderTemplate (bad {{var}}) and runPipeline (pipeline has no steps) can
+    // both throw BEFORE runPipeline creates a pipeline_runs row. For an
+    // unattended fire the scheduler would just log-and-reschedule, leaving zero
+    // run rows — the automation silently no-ops forever with nothing in the UI.
+    // Synthesize a failed run so RunHistory surfaces it like any other failure.
+    let input = a.input_template;
+    let result: PipelineRunResult;
+    try {
+        input = renderTemplate(a.input_template, {
+            date: new Date().toISOString().slice(0, 10),
+        });
+        result = await runPipeline({
+            pipelineId: a.pipeline_id,
+            input,
+            runtime,
+            automationId: a.id,
+        });
+    } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        const run = await createRun({
+            pipelineId: a.pipeline_id,
+            automationId: a.id,
+            input,
+        });
+        await finishRun(run.id, { status: "error", error: message });
+        throw e; // let the scheduler log it too
+    }
     if (a.output_note_folder && result.status === "success") {
         await createNote({
             title: `${a.name} — ${new Date().toLocaleString()}`,
