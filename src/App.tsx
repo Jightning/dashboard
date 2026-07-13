@@ -4,6 +4,8 @@ import { bootstrap, type BootResult } from "./app/bootstrap";
 import { RuntimeContext } from "./app/runtime";
 import { NeuralCore } from "@/components/hud/NeuralCore";
 import { Typewriter } from "@/components/hud/Typewriter";
+import { startAutomationScheduler } from "@/ai/automations/scheduler";
+import { appFetch } from "@/ai/providers/appFetch";
 import type { Settings } from "@/ai/providers/keys";
 
 function BootScreen() {
@@ -40,6 +42,11 @@ export default function App() {
         if (!boot) return;
         setSettings(await boot.settingsStore.load());
     }, [boot]);
+
+    useEffect(() => {
+        if (!boot || !settings) return;
+        return startAutomationScheduler({ settings, fetch: appFetch });
+    }, [boot, settings]);
 
     if (error) {
         return (

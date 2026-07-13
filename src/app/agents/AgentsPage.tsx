@@ -11,6 +11,7 @@ import { agentSlug, agentToolNames, type AgentDef } from "@/lib/schemas";
 import { AgentEditor } from "./AgentEditor";
 import { AgentTestBench } from "./AgentTestBench";
 import { PipelinesTab } from "./PipelinesTab";
+import { AutomationsTab } from "./AutomationsTab";
 import { cn } from "@/lib/utils";
 
 type Tab = "roster" | "pipelines" | "automations";
@@ -39,7 +40,7 @@ export function AgentsPage() {
                 <TabBar tab={tab} onSelect={setTab} />
                 {tab === "roster" && <RosterTab />}
                 {tab === "pipelines" && <PipelinesTab />}
-                {tab === "automations" && <AutomationsPlaceholder />}
+                {tab === "automations" && <AutomationsTab />}
             </div>
         </div>
     );
@@ -64,13 +65,6 @@ function TabBar({ tab, onSelect }: { tab: Tab; onSelect: (t: Tab) => void }) {
                 </button>
             ))}
         </div>
-    );
-}
-
-// Replaced by the real tab in Task 15.
-function AutomationsPlaceholder() {
-    return (
-        <p className="text-sm text-muted-foreground">Automations arrive next.</p>
     );
 }
 
