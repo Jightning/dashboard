@@ -89,3 +89,33 @@ export async function applyPermissionLevel(
     const grants = await listGrants(permissionLevelId);
     permissions.levelGrants = grants.map(toScopedGrant);
 }
+
+/**
+ * Runtime for pipeline/automation runs — no preset involved: models come from
+ * the settings defaults; per-agent overrides still apply via resolveModel.
+ */
+export function buildPipelineRuntime(opts: {
+    settings: Settings;
+    fetch: typeof globalThis.fetch;
+    permissions: PermissionContext;
+    onUsage?: (event: AgentUsageEvent) => void;
+}): AgentRuntime {
+    const provider = opts.settings.defaultProvider as ProviderId;
+    const base = { settings: opts.settings, fetch: opts.fetch };
+    return {
+        permissions: opts.permissions,
+        mainModel: createModel(
+            { provider, modelId: opts.settings.defaultModel },
+            base,
+        ),
+        mainModelId: opts.settings.defaultModel,
+        routerModel: createModel(
+            { provider, modelId: opts.settings.routerModel },
+            base,
+        ),
+        routerModelId: opts.settings.routerModel,
+        resolveModel: (modelId) => createModel({ provider, modelId }, base),
+        fetch: opts.fetch,
+        onUsage: opts.onUsage,
+    };
+}
