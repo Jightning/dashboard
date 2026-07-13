@@ -204,6 +204,21 @@ describe("orchestrator routing", () => {
         expect(result.text).toBe("Summary of the page.");
     });
 
+    it("throws (naming both agents) when two enabled agents slug identically", () => {
+        const routerModel = new MockLanguageModelV3({ doGenerate: [] });
+        const mainModel = new MockLanguageModelV3({ doGenerate: [] });
+        expect(() =>
+            createOrchestrator(makeRuntime({ routerModel, mainModel }), {
+                systemPrompt: "Assistant.",
+                // Both slug to ask_hn_digest_agent.
+                agents: [
+                    makeDef({ name: "HN Digest" }),
+                    makeDef({ name: "HN-Digest" }),
+                ],
+            }),
+        ).toThrow(/HN Digest.*HN-Digest|HN-Digest.*HN Digest/);
+    });
+
     it("gates specialist tool calls through the broker across nesting", async () => {
         await insertDocument({
             title: "private journal",

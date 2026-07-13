@@ -26,8 +26,23 @@ export function createOrchestrator(
     opts: { systemPrompt: string; agents: AgentDef[] },
 ) {
     const tools: ToolSet = {};
+    // Two names can slug to the same delegation tool (e.g. "HN Digest" and
+    // "HN-Digest" both -> ask_hn_digest_agent). The agents table only enforces
+    // UNIQUE(name), not unique slug, so fail fast rather than silently letting
+    // the second agent's tool overwrite the first — a silent loss of the ability
+    // to delegate to whichever agent got clobbered.
+    const toolOwner = new Map<string, string>();
     for (const def of opts.agents) {
-        tools[delegationToolName(def)] = tool({
+        const toolName = delegationToolName(def);
+        const owner = toolOwner.get(toolName);
+        if (owner !== undefined) {
+            throw new Error(
+                `agents "${owner}" and "${def.name}" both map to the delegation tool "${toolName}" ` +
+                    `— their names slug identically; rename one so both can be delegated to.`,
+            );
+        }
+        toolOwner.set(toolName, def.name);
+        tools[toolName] = tool({
             description: `Ask the ${def.name} agent. ${def.description}`,
             inputSchema: delegationInput,
             execute: async ({ task }) => runSpecialist(def, runtime, task),
