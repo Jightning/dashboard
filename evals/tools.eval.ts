@@ -1,5 +1,6 @@
 import { evalite } from "evalite";
-import { createKnowledgeAgent } from "@/ai/agents/knowledge";
+import { createAgentFromDef } from "@/ai/agents/factory";
+import { getAgent, BUILTIN_AGENT_IDS } from "@/db/repo/agents";
 import { getEvalModels } from "./models";
 import { makeEvalRuntime, seedEvalDb, PLANTED_FACTS } from "./fixtures";
 import { containsAll } from "./scorers";
@@ -53,7 +54,8 @@ run<string, string, string[]>("Knowledge agent retrieves planted facts", {
                 },
             ],
         });
-        const agent = createKnowledgeAgent(runtime);
+        const def = await getAgent(BUILTIN_AGENT_IDS.knowledge);
+        const { agent } = createAgentFromDef(def, runtime);
         const result = await agent.generate({ prompt: input });
         return result.text;
     },

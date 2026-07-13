@@ -1,6 +1,7 @@
 import { createTestDbClient } from "@/db/testClient";
 import { setDb } from "@/db/client";
 import { insertDocument } from "@/db/repo/documents";
+import { seedBuiltinAgents } from "@/db/repo/agents";
 import { createSession } from "@/db/repo/sessions";
 import { insertMessage } from "@/db/repo/messages";
 import { PermissionContext } from "@/ai/tools/context";
@@ -17,6 +18,7 @@ export const PLANTED_FACTS = {
 export async function seedEvalDb() {
     const db = createTestDbClient();
     setDb(db);
+    await seedBuiltinAgents();
     await insertDocument({
         title: "Thermodynamics lecture 12",
         contentText: `Heat engines and reversibility. Key result: ${PLANTED_FACTS.thermo}. Remember the derivation uses reservoir temperatures.`,

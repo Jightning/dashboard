@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
     Check,
     ChevronDown,
@@ -9,8 +9,13 @@ import {
     Trash2,
     X,
 } from "lucide-react";
-import { presetAgents } from "@/lib/schemas";
-import type { ChatSession, PermissionLevel, Preset } from "@/lib/schemas";
+import { agentSlug, presetAgents } from "@/lib/schemas";
+import type {
+    AgentDef,
+    ChatSession,
+    PermissionLevel,
+    Preset,
+} from "@/lib/schemas";
 import { sessionMessageCount } from "@/db/repo/messages";
 import { agentColor } from "@/components/hud/AgentNode";
 import { relativeTime, sessionColor } from "@/components/hud/networkData";
@@ -25,6 +30,7 @@ export function InstancesSidebar({
     sessions,
     presets,
     levels,
+    agents,
     activeId,
     highlightId,
     onOpen,
@@ -35,6 +41,7 @@ export function InstancesSidebar({
     sessions: ChatSession[];
     presets: Preset[];
     levels: PermissionLevel[];
+    agents: AgentDef[];
     activeId: string | null;
     highlightId: string | null;
     onOpen: (session: ChatSession) => void;
@@ -50,6 +57,10 @@ export function InstancesSidebar({
 
     const presetById = new Map(presets.map((p) => [p.id, p]));
     const levelById = new Map(levels.map((l) => [l.id, l]));
+    const agentsById = useMemo(
+        () => new Map(agents.map((a) => [a.id, a])),
+        [agents],
+    );
 
     const toggleExpand = useCallback(
         (id: string) => {
@@ -95,6 +106,7 @@ export function InstancesSidebar({
                                     s.preset_id
                                         ? presetById.get(s.preset_id)
                                         : undefined,
+                                    agentsById,
                                 ),
                                 borderColor: "transparent",
                             }}
@@ -142,11 +154,15 @@ export function InstancesSidebar({
                     const preset = s.preset_id
                         ? presetById.get(s.preset_id)
                         : undefined;
-                    const color = sessionColor(preset);
+                    const color = sessionColor(preset, agentsById);
                     const active = activeId === s.id;
                     const highlit = highlightId === s.id;
                     const expanded = expandedId === s.id;
-                    const agents = preset ? safeAgents(preset) : [];
+                    const agentDefs = preset
+                        ? safeAgents(preset)
+                              .map((id) => agentsById.get(id))
+                              .filter((d): d is AgentDef => d !== undefined)
+                        : [];
                     return (
                         <div
                             key={s.id}
@@ -235,20 +251,28 @@ export function InstancesSidebar({
                                             : "—"}
                                     </Detail>
                                     <Detail label="Agents">
-                                        {agents.length ? (
+                                        {agentDefs.length ? (
                                             <div className="flex flex-wrap gap-1">
-                                                {agents.map((a) => (
-                                                    <span
-                                                        key={a}
-                                                        className="rounded-sm px-1 py-0.5 font-mono text-[9px]"
-                                                        style={{
-                                                            color: agentColor(a),
-                                                            background: `color-mix(in oklab, ${agentColor(a)} 15%, transparent)`,
-                                                        }}
-                                                    >
-                                                        {a}
-                                                    </span>
-                                                ))}
+                                                {agentDefs.map((a) => {
+                                                    const slug = agentSlug(
+                                                        a.name,
+                                                    );
+                                                    const c =
+                                                        a.color ??
+                                                        agentColor(slug);
+                                                    return (
+                                                        <span
+                                                            key={a.id}
+                                                            className="rounded-sm px-1 py-0.5 font-mono text-[9px]"
+                                                            style={{
+                                                                color: c,
+                                                                background: `color-mix(in oklab, ${c} 15%, transparent)`,
+                                                            }}
+                                                        >
+                                                            {slug}
+                                                        </span>
+                                                    );
+                                                })}
                                             </div>
                                         ) : (
                                             "orchestrator only"

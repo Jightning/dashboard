@@ -94,7 +94,7 @@ function makeContext(opts: {
     };
     const orchestrator = createOrchestrator(runtime, {
         systemPrompt: opts.preset.system_prompt,
-        enabledAgents: [],
+        agents: [],
     });
     return {
         sessionId: opts.sessionId,

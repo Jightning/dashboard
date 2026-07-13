@@ -1,9 +1,28 @@
 import { evalite } from "evalite";
 import { MockLanguageModelV3 } from "ai/test";
 import { createOrchestrator } from "@/ai/agents/orchestrator";
+import type { AgentDef } from "@/lib/schemas";
 import { getEvalModels } from "./models";
 import { makeEvalRuntime, seedEvalDb } from "./fixtures";
 import { exactRoute } from "./scorers";
+
+const evalDef = (
+    name: string,
+    description: string,
+    tools: string[],
+): AgentDef => ({
+    id: `agt_${name.toLowerCase()}`,
+    name,
+    description,
+    instructions: `You are the ${name} agent.`,
+    tools_json: JSON.stringify(tools),
+    model: null,
+    max_steps: 6,
+    color: null,
+    is_builtin: 1,
+    created_at: 0,
+    updated_at: 0,
+});
 
 /**
  * Does the (real) router model pick the right first move?
@@ -110,7 +129,14 @@ run<string, string, string>("Router picks the right agent", {
         const orchestrator = createOrchestrator(runtime, {
             systemPrompt:
                 "You are the user's personal dashboard assistant with access to their stored documents (via the knowledge agent) and the web (via the research agent).",
-            enabledAgents: ["knowledge", "research"],
+            agents: [
+                evalDef(
+                    "Knowledge",
+                    "Searches and reads the user's stored documents and notes.",
+                    ["search_documents", "read_document", "list_documents"],
+                ),
+                evalDef("Research", "Reads specific web pages.", ["fetch_url"]),
+            ],
         });
 
         const result = await orchestrator.generate({ prompt: input });

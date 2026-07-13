@@ -1,7 +1,8 @@
 import { getDb } from "../client";
 import { newId, now } from "@/lib/ids";
-import { presetSchema, type AgentName, type Preset } from "@/lib/schemas";
+import { presetSchema, type Preset } from "@/lib/schemas";
 import { BUILTIN_LEVELS } from "./permissions";
+import { BUILTIN_AGENT_IDS } from "./agents";
 
 export interface PresetInput {
     name: string;
@@ -10,7 +11,7 @@ export interface PresetInput {
     provider: string;
     model: string;
     routerModel?: string | null;
-    enabledAgents: AgentName[];
+    enabledAgents: string[];
     permissionLevelId?: string | null;
     tokenBudget?: number | null;
     compactionThreshold?: number | null;
@@ -48,7 +49,7 @@ export async function seedBuiltinPresets(defaults: {
             provider: defaults.provider,
             model: defaults.model,
             routerModel: defaults.routerModel,
-            enabledAgents: ["knowledge"],
+            enabledAgents: [BUILTIN_AGENT_IDS.knowledge],
             permissionLevelId: BUILTIN_LEVELS.readDocuments,
             tokenBudget: 100_000,
             compactionThreshold: DEFAULT_COMPACTION_THRESHOLD,
@@ -63,7 +64,10 @@ export async function seedBuiltinPresets(defaults: {
             provider: defaults.provider,
             model: defaults.model,
             routerModel: defaults.routerModel,
-            enabledAgents: ["knowledge", "research"],
+            enabledAgents: [
+                BUILTIN_AGENT_IDS.knowledge,
+                BUILTIN_AGENT_IDS.research,
+            ],
             permissionLevelId: BUILTIN_LEVELS.readDocuments,
             tokenBudget: 150_000,
             compactionThreshold: DEFAULT_COMPACTION_THRESHOLD,

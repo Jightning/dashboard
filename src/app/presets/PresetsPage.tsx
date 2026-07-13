@@ -2,9 +2,10 @@ import { useCallback, useEffect, useState } from "react";
 import { Trash2, Pencil } from "lucide-react";
 import * as presetsRepo from "@/db/repo/presets";
 import { listLevels } from "@/db/repo/permissions";
+import { listAgents } from "@/db/repo/agents";
 import {
     presetAgents,
-    type AgentName,
+    type AgentDef,
     type PermissionLevel,
     type Preset,
 } from "@/lib/schemas";
@@ -15,16 +16,16 @@ import { Input, Textarea } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
-const ALL_AGENTS: AgentName[] = ["knowledge", "research"];
-
 export function PresetsPage() {
     const [presets, setPresets] = useState<Preset[]>([]);
     const [levels, setLevels] = useState<PermissionLevel[]>([]);
+    const [agents, setAgents] = useState<AgentDef[]>([]);
     const [editing, setEditing] = useState<Preset | "new" | null>(null);
 
     const reload = useCallback(async () => {
         setPresets(await presetsRepo.listPresets());
         setLevels(await listLevels());
+        setAgents(await listAgents());
     }, []);
 
     useEffect(() => {
@@ -56,7 +57,14 @@ export function PresetsPage() {
                                         ? ` · router ${p.router_model}`
                                         : ""}{" "}
                                     · agents:{" "}
-                                    {presetAgents(p).join(", ") || "none"}
+                                    {presetAgents(p)
+                                        .map(
+                                            (id) =>
+                                                agents.find(
+                                                    (a) => a.id === id,
+                                                )?.name ?? id,
+                                        )
+                                        .join(", ") || "none"}
                                 </p>
                             </div>
                             <div className="flex gap-1">
@@ -91,6 +99,7 @@ export function PresetsPage() {
                     <PresetForm
                         preset={editing === "new" ? null : editing}
                         levels={levels}
+                        agents={agents}
                         onDone={async () => {
                             setEditing(null);
                             await reload();
@@ -112,10 +121,12 @@ export function PresetsPage() {
 function PresetForm({
     preset,
     levels,
+    agents,
     onDone,
 }: {
     preset: Preset | null;
     levels: PermissionLevel[];
+    agents: AgentDef[];
     onDone: () => Promise<void>;
 }) {
     const [form, setForm] = useState<presetsRepo.PresetInput>(() =>
@@ -158,12 +169,12 @@ function PresetForm({
         }
     };
 
-    const toggleAgent = (agent: AgentName) => {
+    const toggleAgent = (id: string) => {
         setForm((f) => ({
             ...f,
-            enabledAgents: f.enabledAgents.includes(agent)
-                ? f.enabledAgents.filter((a) => a !== agent)
-                : [...f.enabledAgents, agent],
+            enabledAgents: f.enabledAgents.includes(id)
+                ? f.enabledAgents.filter((a) => a !== id)
+                : [...f.enabledAgents, id],
         }));
     };
 
@@ -246,19 +257,16 @@ function PresetForm({
                         />
                     </label>
                 </div>
-                <div className="flex items-center gap-4 text-sm">
+                <div className="flex flex-wrap items-center gap-4 text-sm">
                     Agents:
-                    {ALL_AGENTS.map((agent) => (
-                        <label
-                            key={agent}
-                            className="flex items-center gap-1.5"
-                        >
+                    {agents.map((a) => (
+                        <label key={a.id} className="flex items-center gap-1.5">
                             <input
                                 type="checkbox"
-                                checked={form.enabledAgents.includes(agent)}
-                                onChange={() => toggleAgent(agent)}
+                                checked={form.enabledAgents.includes(a.id)}
+                                onChange={() => toggleAgent(a.id)}
                             />
-                            {agent}
+                            {a.name}
                         </label>
                     ))}
                 </div>

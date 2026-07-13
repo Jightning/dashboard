@@ -5,6 +5,7 @@ import { PermissionContext } from "@/ai/tools/context";
 import { listGrants } from "@/db/repo/permissions";
 import { toScopedGrant } from "@/ai/permissions/engine";
 import { presetAgents, type Preset } from "@/lib/schemas";
+import { listAgents } from "@/db/repo/agents";
 import { createOrchestrator } from "./orchestrator";
 import type { AgentRuntime, AgentUsageEvent } from "./types";
 
@@ -52,9 +53,12 @@ export async function buildSessionAgent(opts: {
         onUsage: opts.onUsage,
     };
 
+    const enabled = new Set(presetAgents(preset));
+    const agents = (await listAgents()).filter((a) => enabled.has(a.id));
+
     const orchestrator = createOrchestrator(runtime, {
         systemPrompt: preset.system_prompt,
-        enabledAgents: presetAgents(preset),
+        agents,
     });
 
     return {

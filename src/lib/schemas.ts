@@ -28,9 +28,6 @@ export const permissionGrantSchema = z.object({
 });
 export type PermissionGrant = z.infer<typeof permissionGrantSchema>;
 
-export const agentNameSchema = z.enum(["knowledge", "research"]);
-export type AgentName = z.infer<typeof agentNameSchema>;
-
 export const presetSchema = z.object({
     id: z.string(),
     name: z.string(),
@@ -49,10 +46,9 @@ export const presetSchema = z.object({
 });
 export type Preset = z.infer<typeof presetSchema>;
 
-export function presetAgents(preset: Preset): AgentName[] {
-    return z
-        .array(agentNameSchema)
-        .parse(JSON.parse(preset.enabled_agents_json));
+/** Agent ids (rows in the agents table) enabled by a preset. */
+export function presetAgents(preset: Preset): string[] {
+    return z.array(z.string()).parse(JSON.parse(preset.enabled_agents_json));
 }
 
 export const agentDefSchema = z.object({

@@ -9,9 +9,8 @@
  * from listDocuments/listNotes without touching this component.
  */
 import type { ChatSession, Preset } from "@/lib/schemas";
-import { presetAgents } from "@/lib/schemas";
+import { agentSlug, agentToolNames, presetAgents, type AgentDef } from "@/lib/schemas";
 import { agentColor } from "./AgentNode";
-import { agentSpec, agentTools } from "./agentCatalog";
 import { fibonacciSphere, tangentOffset, type Vec3 } from "./sphere";
 
 export type NodeKind = "session" | "agent" | "tool" | "doc" | "note";
@@ -62,11 +61,33 @@ const TOOL_R = 0.85;
 const AGENT_SPREAD = 0.42;
 const TOOL_SPREAD = 0.22;
 
+/** Display info derived from a definition; color falls back to the identity hue. */
+function agentInfo(def: AgentDef) {
+    const slug = agentSlug(def.name);
+    return {
+        slug,
+        color: def.color ?? agentColor(slug),
+        tools: safeToolNames(def),
+    };
+}
+
+function safeToolNames(def: AgentDef): string[] {
+    try {
+        return agentToolNames(def);
+    } catch {
+        return [];
+    }
+}
+
 /** A session's identity color: its lone specialist, else the orchestrator hue. */
-export function sessionColor(preset: Preset | undefined): string {
+export function sessionColor(
+    preset: Preset | undefined,
+    agentsById: Map<string, AgentDef>,
+): string {
     if (!preset) return "var(--primary)";
-    const agents = safeAgents(preset);
-    return agents.length === 1 ? agentColor(agents[0]!) : ORCHESTRATOR;
+    const ids = safeAgents(preset);
+    const def = ids.length === 1 ? agentsById.get(ids[0]!) : undefined;
+    return def ? agentInfo(def).color : ORCHESTRATOR;
 }
 
 function safeAgents(preset: Preset | undefined): string[] {
@@ -89,19 +110,18 @@ function attachAgent(
     net: Network,
     hubId: string,
     hubUnit: Vec3,
-    agentName: string,
+    def: AgentDef,
     slot: number,
     slots: number,
     idPrefix: string,
 ) {
     const unit = satelliteUnit(hubUnit, slot, slots, AGENT_SPREAD);
-    const color = agentColor(agentName);
-    const spec = agentSpec(agentName);
-    const agentId = `${idPrefix}:agent:${agentName}`;
+    const { slug, color, tools } = agentInfo(def);
+    const agentId = `${idPrefix}:agent:${slug}`;
     net.nodes.push({
         id: agentId,
         kind: "agent",
-        label: agentName,
+        label: slug,
         color,
         unit,
         r: AGENT_R,
@@ -109,27 +129,26 @@ function attachAgent(
         // Context around the instance — hover reveals it; the hub is the click target.
         primary: false,
         meta: {
-            title: spec?.title ?? agentName,
-            subtitle: spec?.role,
-            chips: agentTools(agentName).map((t) => ({ label: t })),
+            title: def.name,
+            subtitle: def.description,
+            chips: tools.map((t) => ({ label: t })),
         },
     });
     net.edges.push({ a: hubId, b: agentId });
 
-    const tools = agentTools(agentName);
-    tools.forEach((tool, ti) => {
+    tools.forEach((toolName, ti) => {
         const tUnit = satelliteUnit(unit, ti, tools.length, TOOL_SPREAD);
-        const toolId = `${agentId}:tool:${tool}`;
+        const toolId = `${agentId}:tool:${toolName}`;
         net.nodes.push({
             id: toolId,
             kind: "tool",
-            label: tool,
+            label: toolName,
             color,
             unit: tUnit,
             r: TOOL_R,
             parentId: hubId,
             primary: false,
-            meta: { title: tool, subtitle: `tool · ${agentName}` },
+            meta: { title: toolName, subtitle: `tool · ${slug}` },
         });
         net.edges.push({ a: agentId, b: toolId });
     });
@@ -156,10 +175,12 @@ const MAX_SESSIONS = 10;
 export function buildSessionNetwork(
     sessions: ChatSession[],
     presets: Preset[],
+    agents: AgentDef[],
 ): Network {
     const shown = sessions.slice(0, MAX_SESSIONS);
     const hubUnits = fibonacciSphere(shown.length);
     const presetById = new Map(presets.map((p) => [p.id, p]));
+    const agentsById = new Map(agents.map((a) => [a.id, a]));
     const net: Network = { nodes: [], edges: [] };
 
     shown.forEach((session, i) => {
@@ -167,13 +188,15 @@ export function buildSessionNetwork(
         const preset = session.preset_id
             ? presetById.get(session.preset_id)
             : undefined;
-        const agents = safeAgents(preset);
+        const defs = safeAgents(preset)
+            .map((id) => agentsById.get(id))
+            .filter((d): d is AgentDef => d !== undefined);
         const hubId = `session:${session.id}`;
         net.nodes.push({
             id: hubId,
             kind: "session",
             label: session.title,
-            color: sessionColor(preset),
+            color: sessionColor(preset, agentsById),
             unit: hubUnit,
             r: HUB_R,
             primary: true,
@@ -182,87 +205,77 @@ export function buildSessionNetwork(
                 subtitle: preset
                     ? `${preset.name} · ${preset.provider}/${preset.model}`
                     : "no preset",
-                chips: agents.map((a) => ({ label: a, color: agentColor(a) })),
+                chips: defs.map((d) => {
+                    const info = agentInfo(d);
+                    return { label: info.slug, color: info.color };
+                }),
                 foot: `updated ${relativeTime(session.updated_at)}`,
             },
             payload: session,
         });
-        agents.forEach((agent, k) =>
-            attachAgent(net, hubId, hubUnit, agent, k, agents.length, hubId),
+        defs.forEach((def, k) =>
+            attachAgent(net, hubId, hubUnit, def, k, defs.length, hubId),
         );
     });
 
     return net;
 }
 
-/**
- * The static agent topology (orchestrator hub → specialists → their tools).
- * Used by the Agents page and as the empty-state fallback when no sessions
- * exist yet.
- */
-export function buildAgentTypeNetwork(): Network {
-    const specialists = ["knowledge", "research", "planner"];
-    // Orchestrator + specialists distributed on the sphere.
-    const primaries = ["orchestrator", ...specialists];
-    const units = fibonacciSphere(primaries.length);
-    const unitByName = new Map(primaries.map((n, i) => [n, units[i]!]));
+/** Orchestrator hub → every defined agent → its tools. */
+export function buildAgentTypeNetwork(agents: AgentDef[]): Network {
+    const units = fibonacciSphere(agents.length + 1);
     const net: Network = { nodes: [], edges: [] };
 
-    const orchUnit = unitByName.get("orchestrator")!;
-    const orch = agentSpec("orchestrator");
     net.nodes.push({
         id: "agent:orchestrator",
         kind: "agent",
         label: "orchestrator",
         color: ORCHESTRATOR,
-        unit: orchUnit,
+        unit: units[0]!,
         r: HUB_R,
         primary: true,
         meta: {
-            title: orch?.title ?? "Orchestrator",
-            subtitle: orch?.role,
+            title: "Orchestrator",
+            subtitle:
+                "Runs on the preset's router model. Answers directly when it can; delegates to your agents as tool calls.",
         },
         payload: { agent: "orchestrator" },
     });
 
-    specialists.forEach((name) => {
-        const unit = unitByName.get(name)!;
-        const spec = agentSpec(name);
-        const color = agentColor(name);
-        const id = `agent:${name}`;
+    agents.forEach((def, i) => {
+        const unit = units[i + 1]!;
+        const { slug, color, tools } = agentInfo(def);
+        const id = `agent:${def.id}`;
         net.nodes.push({
             id,
             kind: "agent",
-            label: name,
+            label: slug,
             color,
             unit,
             r: AGENT_R + 0.3,
             primary: true,
             meta: {
-                title: spec?.title ?? name,
-                subtitle: spec?.role,
-                chips: agentTools(name).map((t) => ({ label: t })),
-                foot: spec?.future ? `${spec.future} · coming soon` : undefined,
+                title: def.name,
+                subtitle: def.description,
+                chips: tools.map((t) => ({ label: t })),
             },
-            payload: { agent: name },
+            payload: { agent: def.id },
         });
-        // Delegation edge from the orchestrator hub.
-        if (name !== "planner") net.edges.push({ a: "agent:orchestrator", b: id });
+        net.edges.push({ a: "agent:orchestrator", b: id });
 
-        const tools = agentTools(name);
-        tools.forEach((tool, ti) => {
+        tools.forEach((toolName, ti) => {
             const tUnit = satelliteUnit(unit, ti, tools.length, TOOL_SPREAD);
-            const toolId = `${id}:tool:${tool}`;
+            const toolId = `${id}:tool:${toolName}`;
             net.nodes.push({
                 id: toolId,
                 kind: "tool",
-                label: tool,
+                label: toolName,
                 color,
                 unit: tUnit,
                 r: TOOL_R,
                 parentId: id,
                 primary: false,
-                meta: { title: tool, subtitle: `tool · ${name}` },
+                meta: { title: toolName, subtitle: `tool · ${slug}` },
             });
             net.edges.push({ a: id, b: toolId });
         });

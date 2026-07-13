@@ -1,12 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { AgentName } from "@/lib/schemas";
 import { presetAgents } from "@/lib/schemas";
 import { useChat } from "@ai-sdk/react";
 import type { UIMessage } from "ai";
 import { Shield } from "lucide-react";
 import { useRuntime } from "@/app/runtime";
-import { tauriFetch } from "@/ai/providers/tauriFetch";
-import { isTauri } from "@/lib/env";
+import { appFetch } from "@/ai/providers/appFetch";
 import { applyPermissionLevel, buildSessionAgent } from "@/ai/agents/runtime";
 import {
     createModel,
@@ -26,7 +24,13 @@ import * as sessionsRepo from "@/db/repo/sessions";
 import * as messagesRepo from "@/db/repo/messages";
 import { getPreset, listPresets } from "@/db/repo/presets";
 import { listLevels } from "@/db/repo/permissions";
-import type { ChatSession, PermissionLevel, Preset } from "@/lib/schemas";
+import { listAgents } from "@/db/repo/agents";
+import type {
+    AgentDef,
+    ChatSession,
+    PermissionLevel,
+    Preset,
+} from "@/lib/schemas";
 import { MessageList } from "@/components/chat/MessageList";
 import { Composer } from "@/components/chat/Composer";
 import { ApprovalCards } from "@/components/chat/ApprovalCard";
@@ -39,11 +43,6 @@ import {
 import { Typewriter } from "@/components/hud/Typewriter";
 import { Select } from "@/components/ui/select";
 import { InstancesSidebar } from "./InstancesSidebar";
-
-// Only Tauri routes provider calls through Rust (dodges browser CORS); a
-// plain browser tab uses the global fetch, bound so it isn't called detached
-// from `window` (some engines throw "Illegal invocation" otherwise).
-const appFetch = isTauri() ? tauriFetch : globalThis.fetch.bind(globalThis);
 
 interface ActiveChat {
     session: ChatSession;
@@ -58,6 +57,7 @@ export function ChatPage() {
     const [sessions, setSessions] = useState<ChatSession[]>([]);
     const [presets, setPresets] = useState<Preset[]>([]);
     const [levels, setLevels] = useState<PermissionLevel[]>([]);
+    const [agents, setAgents] = useState<AgentDef[]>([]);
     const [active, setActive] = useState<ActiveChat | null>(null);
     const [error, setError] = useState<string | null>(null);
     // Session id highlighted by hovering a sphere node or a sidebar row.
@@ -70,6 +70,7 @@ export function ChatPage() {
             setSessions(await sessionsRepo.listSessions());
             setPresets(await listPresets());
             setLevels(await listLevels());
+            setAgents(await listAgents());
         })();
     }, []);
 
@@ -128,9 +129,9 @@ export function ChatPage() {
     const network = useMemo(
         () =>
             sessions.length
-                ? buildSessionNetwork(sessions, presets)
-                : buildAgentTypeNetwork(),
-        [sessions, presets],
+                ? buildSessionNetwork(sessions, presets, agents)
+                : buildAgentTypeNetwork(agents),
+        [sessions, presets, agents],
     );
 
     const openFromNode = useCallback(
@@ -147,7 +148,7 @@ export function ChatPage() {
             const preset =
                 presets.find((p) => {
                     try {
-                        return presetAgents(p).includes(agent as AgentName);
+                        return presetAgents(p).includes(agent);
                     } catch {
                         return false;
                     }
@@ -174,6 +175,7 @@ export function ChatPage() {
                 sessions={sessions}
                 presets={presets}
                 levels={levels}
+                agents={agents}
                 activeId={active?.session.id ?? null}
                 highlightId={hoveredInstanceId}
                 onOpen={(s) => void openSession(s)}

@@ -264,7 +264,7 @@ describe("presets", () => {
 
         const research = all.find((p) => p.name === "Research")!;
         const { presetAgents } = await import("@/lib/schemas");
-        expect(presetAgents(research)).toEqual(["knowledge", "research"]);
+        expect(presetAgents(research)).toEqual(["agt_knowledge", "agt_research"]);
     });
 
     it("does CRUD on custom presets and protects built-ins", async () => {

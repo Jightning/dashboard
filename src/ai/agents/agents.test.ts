@@ -7,6 +7,29 @@ import { insertDocument } from "@/db/repo/documents";
 import { PermissionContext } from "@/ai/tools/context";
 import { createOrchestrator } from "./orchestrator";
 import type { AgentRuntime, AgentUsageEvent } from "./types";
+import type { AgentDef } from "@/lib/schemas";
+
+function makeDef(overrides: Partial<AgentDef> & { name: string }): AgentDef {
+    return {
+        id: `agt_${overrides.name.toLowerCase()}`,
+        description: `${overrides.name} specialist`,
+        instructions: `You are the ${overrides.name} agent.`,
+        tools_json: "[]",
+        model: null,
+        max_steps: 6,
+        color: null,
+        is_builtin: 0,
+        created_at: 0,
+        updated_at: 0,
+        ...overrides,
+    };
+}
+
+const KNOWLEDGE_DEF = makeDef({
+    name: "Knowledge",
+    tools_json: '["search_documents","read_document","list_documents"]',
+});
+const RESEARCH_DEF = makeDef({ name: "Research", tools_json: '["fetch_url"]' });
 
 let db: ReturnType<typeof createTestDbClient>;
 
@@ -107,7 +130,7 @@ describe("orchestrator routing", () => {
 
         const orchestrator = createOrchestrator(runtime, {
             systemPrompt: "You are a study assistant.",
-            enabledAgents: ["knowledge"],
+            agents: [KNOWLEDGE_DEF],
         });
         const result = await orchestrator.generate({
             prompt: "What do my notes say about Carnot?",
@@ -138,7 +161,7 @@ describe("orchestrator routing", () => {
             makeRuntime({ routerModel, mainModel }),
             {
                 systemPrompt: "Quick answers.",
-                enabledAgents: [],
+                agents: [],
             },
         );
 
@@ -167,7 +190,7 @@ describe("orchestrator routing", () => {
             makeRuntime({ routerModel, mainModel }),
             {
                 systemPrompt: "Research assistant.",
-                enabledAgents: ["knowledge", "research"],
+                agents: [KNOWLEDGE_DEF, RESEARCH_DEF],
             },
         );
 
@@ -214,7 +237,7 @@ describe("orchestrator routing", () => {
 
         const orchestrator = createOrchestrator(runtime, {
             systemPrompt: "Assistant.",
-            enabledAgents: ["knowledge"],
+            agents: [KNOWLEDGE_DEF],
         });
         await orchestrator.generate({ prompt: "Read my journal" });
 
