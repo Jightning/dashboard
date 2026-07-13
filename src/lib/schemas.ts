@@ -205,3 +205,41 @@ export const automationSchema = z.object({
     updated_at: z.number(),
 });
 export type Automation = z.infer<typeof automationSchema>;
+
+export const courseSchema = z.object({
+    id: z.string(),
+    code: z.string(),
+    name: z.string(),
+    term: z.string(),
+    folder: z.string(),
+    color: z.string().nullable(),
+    created_at: z.number(),
+});
+export type Course = z.infer<typeof courseSchema>;
+
+export const recurrenceSchema = z.enum(["daily", "weekly", "monthly"]);
+
+export const taskSchema = z.object({
+    id: z.string(),
+    title: z.string(),
+    notes: z.string().nullable(),
+    course_id: z.string().nullable(),
+    due_at: z.number().nullable(),
+    recurrence: recurrenceSchema.nullable(),
+    completed_at: z.number().nullable(),
+    created_at: z.number(),
+    updated_at: z.number(),
+});
+export type Task = z.infer<typeof taskSchema>;
+
+export const eventSchema = z.object({
+    id: z.string(),
+    course_id: z.string().nullable(),
+    title: z.string(),
+    location: z.string().nullable(),
+    starts_at: z.number(),
+    ends_at: z.number(),
+    source: z.string(),
+    created_at: z.number(),
+});
+export type CalendarEvent = z.infer<typeof eventSchema>;
