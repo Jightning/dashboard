@@ -7,6 +7,7 @@ import {
     createTask,
     getTask,
     listOpenTasks,
+    updateTask,
 } from "./tasks";
 import {
     deleteEventsBySource,
@@ -66,6 +67,13 @@ describe("tasks repo", () => {
         expect(next!.due_at).toBe(due + 7 * 86_400_000);
         expect(next!.recurrence).toBe("weekly");
         expect(await listOpenTasks()).toHaveLength(1);
+    });
+
+    it("updateTask throws when setting recurrence without dueAt", async () => {
+        const t = await createTask({ title: "once", dueAt: Date.now() });
+        await expect(
+            updateTask(t.id, { title: "modified", recurrence: "weekly" }),
+        ).rejects.toThrow(/due date/);
     });
 });
 

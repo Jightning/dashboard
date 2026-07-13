@@ -35,6 +35,8 @@ export async function createTask(input: TaskInput): Promise<Task> {
 }
 
 export async function updateTask(id: string, input: TaskInput): Promise<Task> {
+    if (input.recurrence && input.dueAt == null)
+        throw new Error("a recurring task needs a due date to recur from");
     const res = await getDb().execute(
         `UPDATE tasks SET title = ?, notes = ?, course_id = ?, due_at = ?,
                           recurrence = ?, updated_at = ?
