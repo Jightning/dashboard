@@ -1,20 +1,30 @@
 import { useEffect, useState } from "react";
 import { motion } from "motion/react";
-import { Bookmark, CalendarCheck, ScrollText } from "lucide-react";
 import { listSessions } from "@/db/repo/sessions";
 import { listDocuments } from "@/db/repo/documents";
 import { listNotes } from "@/db/repo/notes";
 import { listPresets } from "@/db/repo/presets";
+import { listOpenTasks } from "@/db/repo/tasks";
+import { listEventsBetween } from "@/db/repo/events";
 import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { NeuralCore } from "@/components/hud/NeuralCore";
 import { Typewriter } from "@/components/hud/Typewriter";
-import { StubPanel } from "@/components/hud/StubPanel";
+import type { CalendarEvent, Task } from "@/lib/schemas";
 
 interface HomeStats {
     sessions: number;
     notes: number;
     documents: number;
     presets: number;
+}
+
+const DAY = 86_400_000;
+
+function endOfToday(): number {
+    const d = new Date();
+    d.setHours(23, 59, 59, 999);
+    return d.getTime();
 }
 
 function greeting(): string {
@@ -27,6 +37,10 @@ function greeting(): string {
 
 export function HomePage() {
     const [stats, setStats] = useState<HomeStats | null>(null);
+    const [today, setToday] = useState<{
+        events: CalendarEvent[];
+        dueTasks: Task[];
+    } | null>(null);
 
     useEffect(() => {
         void (async () => {
@@ -41,6 +55,13 @@ export function HomePage() {
                 notes: notes.length,
                 documents: documents.length,
                 presets: presets.length,
+            });
+            setToday({
+                events: await listEventsBetween(
+                    Date.now() - 12 * 3_600_000,
+                    endOfToday(),
+                ),
+                dueTasks: await listOpenTasks({ dueBefore: endOfToday() + 2 * DAY }),
             });
         })();
     }, []);
@@ -94,27 +115,79 @@ export function HomePage() {
 
                 <section>
                     <h2 className="mb-3 font-mono text-xs uppercase tracking-[0.18em] text-muted-foreground">
-                        Modules — coming online
+                        Today
                     </h2>
-                    <div className="grid grid-cols-2 gap-3 xl:grid-cols-3">
-                        <StubPanel
-                            icon={Bookmark}
-                            title="Bookmarks"
-                            phase="Phase 3"
-                            description="Grouped links with favicons and a ⌘K palette to open anything fast."
-                        />
-                        <StubPanel
-                            icon={ScrollText}
-                            title="Snippets"
-                            phase="Phase 3"
-                            description="Reusable text snippets with one-click copy."
-                        />
-                        <StubPanel
-                            icon={CalendarCheck}
-                            title="Tasks"
-                            phase="Phase 4"
-                            description="Due dates, class schedule import, reminders — and the planner agent."
-                        />
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                        <Card corners className="flex flex-col gap-2 p-4">
+                            <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                                schedule
+                            </span>
+                            {today?.events.length ? (
+                                today.events.map((e) => (
+                                    <div
+                                        key={e.id}
+                                        className="flex items-center gap-2 text-sm"
+                                    >
+                                        <span className="w-16 font-mono text-xs text-primary">
+                                            {new Date(
+                                                e.starts_at,
+                                            ).toLocaleTimeString(undefined, {
+                                                hour: "numeric",
+                                                minute: "2-digit",
+                                            })}
+                                        </span>
+                                        <span className="flex-1 truncate">
+                                            {e.title}
+                                        </span>
+                                        {e.location && (
+                                            <span className="font-mono text-[10px] text-muted-foreground">
+                                                {e.location}
+                                            </span>
+                                        )}
+                                    </div>
+                                ))
+                            ) : (
+                                <span className="text-xs text-muted-foreground">
+                                    No classes today.
+                                </span>
+                            )}
+                        </Card>
+                        <Card corners className="flex flex-col gap-2 p-4">
+                            <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                                due next 48h
+                            </span>
+                            {today?.dueTasks.length ? (
+                                today.dueTasks.map((t) => (
+                                    <div
+                                        key={t.id}
+                                        className="flex items-center gap-2 text-sm"
+                                    >
+                                        <span className="flex-1 truncate">
+                                            {t.title}
+                                        </span>
+                                        <Badge
+                                            tone={
+                                                (t.due_at ?? 0) < Date.now()
+                                                    ? "destructive"
+                                                    : "warning"
+                                            }
+                                        >
+                                            {new Date(
+                                                t.due_at!,
+                                            ).toLocaleString(undefined, {
+                                                weekday: "short",
+                                                hour: "numeric",
+                                            })}
+                                        </Badge>
+                                    </div>
+                                ))
+                            ) : (
+                                <span className="text-xs text-muted-foreground">
+                                    Nothing due. Suspicious — check the Tasks
+                                    page.
+                                </span>
+                            )}
+                        </Card>
                     </div>
                 </section>
             </div>
