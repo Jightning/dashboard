@@ -243,3 +243,38 @@ export const eventSchema = z.object({
     created_at: z.number(),
 });
 export type CalendarEvent = z.infer<typeof eventSchema>;
+
+export const applicationStatusSchema = z.enum([
+    "interested",
+    "applied",
+    "oa",
+    "interview",
+    "offer",
+    "rejected",
+    "ghosted",
+]);
+export type ApplicationStatus = z.infer<typeof applicationStatusSchema>;
+
+export const applicationSchema = z.object({
+    id: z.string(),
+    company: z.string(),
+    role: z.string(),
+    url: z.string().nullable(),
+    status: applicationStatusSchema,
+    applied_at: z.number().nullable(),
+    next_action: z.string().nullable(),
+    next_action_at: z.number().nullable(),
+    notes: z.string().nullable(),
+    created_at: z.number(),
+    updated_at: z.number(),
+});
+export type Application = z.infer<typeof applicationSchema>;
+
+export const applicationEventSchema = z.object({
+    id: z.string(),
+    application_id: z.string(),
+    status: z.string(),
+    note: z.string().nullable(),
+    created_at: z.number(),
+});
+export type ApplicationEvent = z.infer<typeof applicationEventSchema>;
