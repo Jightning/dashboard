@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Textarea } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
-const GROUPS = ["documents", "notes", "web", "tasks"] as const;
+const GROUPS = ["documents", "notes", "web", "tasks", "career"] as const;
 
 export function AgentEditor({
     agent,

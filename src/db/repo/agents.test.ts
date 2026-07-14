@@ -64,11 +64,25 @@ describe("agents repo", () => {
         const agents = await listAgents();
         expect(agents.map((a) => a.id).sort()).toEqual([
             BUILTIN_AGENT_IDS.knowledge,
+            BUILTIN_AGENT_IDS.planner,
             BUILTIN_AGENT_IDS.research,
         ]);
         const knowledge = await getAgent(BUILTIN_AGENT_IDS.knowledge);
         expect(knowledge.is_builtin).toBe(1);
         expect(agentToolNames(knowledge)).toContain("search_documents");
+    });
+
+    it("seeds the planner agent with semester tools", async () => {
+        await seedBuiltinAgents();
+        const planner = await getAgent("agt_planner");
+        expect(planner.is_builtin).toBe(1);
+        expect(agentToolNames(planner)).toEqual([
+            "list_tasks",
+            "create_task",
+            "list_events",
+            "list_applications",
+            "search_notes",
+        ]);
     });
 
     it("creates, updates, and deletes a custom agent", async () => {

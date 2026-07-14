@@ -15,6 +15,7 @@ export interface AgentInput {
 export const BUILTIN_AGENT_IDS = {
     knowledge: "agt_knowledge",
     research: "agt_research",
+    planner: "agt_planner",
 } as const;
 
 const KNOWLEDGE_INSTRUCTIONS = `You are the knowledge agent: you answer questions from the user's stored documents and notes.
@@ -28,6 +29,14 @@ what they say. Only fetch URLs that were given to you or that appear in pages yo
 already fetched. Quote or closely paraphrase sources and name the URL for each claim.
 If a tool result reports {denied: true}, the user refused that fetch — do not retry
 the same domain; report what you could not access.`;
+
+const PLANNER_INSTRUCTIONS = `You are the planner agent for a busy engineering student.
+Ground every plan in real data: list_tasks and list_events first, and
+list_applications when career work is in scope. Propose a concrete, realistic
+schedule around fixed classes; respect due dates; batch similar work. Create
+tasks only when the user asked for them (create_task), and say exactly what
+you created. If a tool result reports {denied: true}, plan without that data
+and say what you could not see.`;
 
 /** Idempotent — called from bootstrap() on every start, like preset seeds. */
 export async function seedBuiltinAgents(): Promise<void> {
@@ -54,6 +63,20 @@ export async function seedBuiltinAgents(): Promise<void> {
                 "Reads specific web pages. Use when the user provides URLs or asks about the content of a particular site.",
             instructions: RESEARCH_INSTRUCTIONS,
             tools: ["fetch_url"],
+        },
+        {
+            id: BUILTIN_AGENT_IDS.planner,
+            name: "Planner",
+            description:
+                "Plans the user's week from tasks, the class schedule, and application follow-ups. Use for 'plan my day/week', workload questions, and creating follow-up tasks.",
+            instructions: PLANNER_INSTRUCTIONS,
+            tools: [
+                "list_tasks",
+                "create_task",
+                "list_events",
+                "list_applications",
+                "search_notes",
+            ],
         },
     ];
     const t = now();

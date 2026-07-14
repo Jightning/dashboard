@@ -3,6 +3,7 @@ import { createDocumentTools } from "./documents";
 import { createNoteTools } from "./notes";
 import { createWebTools } from "./web";
 import { createTaskTools } from "./tasks";
+import { createApplicationTools } from "./applications";
 import type { PermissionContext } from "./context";
 
 /**
@@ -13,7 +14,7 @@ export interface ToolCatalogEntry {
     name: string;
     label: string;
     access: "read" | "write";
-    group: "documents" | "notes" | "web" | "tasks";
+    group: "documents" | "notes" | "web" | "tasks" | "career";
 }
 
 export const TOOL_CATALOG: ToolCatalogEntry[] = [
@@ -29,6 +30,9 @@ export const TOOL_CATALOG: ToolCatalogEntry[] = [
     { name: "create_task", label: "Create a task", access: "write", group: "tasks" },
     { name: "complete_task", label: "Complete a task", access: "write", group: "tasks" },
     { name: "list_events", label: "List calendar events", access: "read", group: "tasks" },
+    { name: "list_applications", label: "List applications", access: "read", group: "career" },
+    { name: "create_application", label: "Track an application", access: "write", group: "career" },
+    { name: "update_application_status", label: "Update application status", access: "write", group: "career" },
 ];
 
 /** Builds the ToolSet for an agent's granted tool names. Throws on unknowns. */
@@ -44,6 +48,7 @@ export function buildToolSet(
         ...createNoteTools(deps.permissions),
         ...createWebTools(deps.permissions, deps.fetch),
         ...createTaskTools(deps.permissions),
+        ...createApplicationTools(deps.permissions),
     };
     const set: ToolSet = {};
     for (const name of names) {
