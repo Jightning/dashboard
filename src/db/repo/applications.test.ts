@@ -1,6 +1,7 @@
 import { beforeEach, afterEach, describe, expect, it } from "vitest";
 import { createTestDbClient } from "@/db/testClient";
-import { setDb } from "@/db/client";
+import { setDb, getDb } from "@/db/client";
+import { newId } from "@/lib/ids";
 import {
     createApplication,
     getApplication,
@@ -40,6 +41,30 @@ describe("applications repo", () => {
         expect((await getApplication(app.id)).applied_at).toBe(
             applied.applied_at,
         );
+    });
+
+    it("breaks created_at ties by insertion order (rowid), most recent first", async () => {
+        // Regression test for a flake: two events logged within the same
+        // millisecond used to come back in an unspecified order because
+        // `ORDER BY created_at DESC` had no tie-breaker. Insert two events
+        // with an identical created_at directly, bypassing setApplicationStatus,
+        // so the timestamp collision is guaranteed rather than timing-dependent.
+        const app = await createApplication({ company: "Tie Co", role: "r" });
+        const sameTimestamp = 1_700_000_000_000;
+        await getDb().execute(
+            `INSERT INTO application_events (id, application_id, status, note, created_at)
+             VALUES (?, ?, ?, ?, ?)`,
+            [newId("ape"), app.id, "applied", null, sameTimestamp],
+        );
+        await getDb().execute(
+            `INSERT INTO application_events (id, application_id, status, note, created_at)
+             VALUES (?, ?, ?, ?, ?)`,
+            [newId("ape"), app.id, "oa", null, sameTimestamp],
+        );
+        const events = await listApplicationEvents(app.id);
+        // Both rows share created_at; the second insert (oa) must still sort
+        // first, since it has the higher rowid.
+        expect(events.map((e) => e.status)).toEqual(["oa", "applied"]);
     });
 
     it("filters by status", async () => {

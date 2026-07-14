@@ -111,7 +111,7 @@ export async function listApplicationEvents(
 ): Promise<ApplicationEvent[]> {
     const rows = await getDb().select(
         `SELECT * FROM application_events WHERE application_id = ?
-         ORDER BY created_at DESC`,
+         ORDER BY created_at DESC, rowid DESC`,
         [applicationId],
     );
     return rows.map((r) => applicationEventSchema.parse(r));
