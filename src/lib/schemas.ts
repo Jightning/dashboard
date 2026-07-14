@@ -294,3 +294,21 @@ export const flashcardSchema = z.object({
     updated_at: z.number(),
 });
 export type Flashcard = z.infer<typeof flashcardSchema>;
+
+export const bookmarkSchema = z.object({
+    id: z.string(),
+    title: z.string(),
+    url: z.string(),
+    group_name: z.string(),
+    created_at: z.number(),
+});
+export type Bookmark = z.infer<typeof bookmarkSchema>;
+
+export const snippetSchema = z.object({
+    id: z.string(),
+    title: z.string(),
+    body: z.string(),
+    created_at: z.number(),
+    updated_at: z.number(),
+});
+export type Snippet = z.infer<typeof snippetSchema>;

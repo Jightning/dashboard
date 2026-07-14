@@ -7,13 +7,11 @@ import {
     MessageSquare,
     Network,
     NotebookPen,
-    ScrollText,
     Settings,
     Shield,
     SlidersHorizontal,
 } from "lucide-react";
 import { motion } from "motion/react";
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
 export type Page =
@@ -24,6 +22,7 @@ export type Page =
     | "tasks"
     | "applications"
     | "review"
+    | "library"
     | "presets"
     | "permissions"
     | "settings";
@@ -50,6 +49,7 @@ const SECTIONS: { heading: string; items: NavItem[] }[] = [
             { page: "tasks", label: "Tasks", icon: CalendarCheck },
             { page: "applications", label: "Applications", icon: Briefcase },
             { page: "review", label: "Review", icon: GraduationCap },
+            { page: "library", label: "Library", icon: Bookmark },
         ],
     },
     {
@@ -60,12 +60,6 @@ const SECTIONS: { heading: string; items: NavItem[] }[] = [
             { page: "settings", label: "Settings", icon: Settings },
         ],
     },
-];
-
-/** Roadmap features that only exist as designed stubs — see StubPanel. */
-const SOON: { label: string; phase: string; icon: typeof MessageSquare }[] = [
-    { label: "Bookmarks", phase: "P3", icon: Bookmark },
-    { label: "Snippets", phase: "P3", icon: ScrollText },
 ];
 
 export function Sidebar({
@@ -120,23 +114,6 @@ export function Sidebar({
                     ))}
                 </div>
             ))}
-
-            <div className="mt-auto flex flex-col gap-0.5 px-2 pb-3">
-                <div className="px-3 pb-1 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground/70">
-                    Soon
-                </div>
-                {SOON.map(({ label, phase, icon: Icon }) => (
-                    <div
-                        key={label}
-                        title={`${label} arrives in roadmap ${phase}`}
-                        className="flex items-center gap-2.5 rounded-md px-3 py-1.5 text-sm text-muted-foreground/50"
-                    >
-                        <Icon aria-hidden className="h-4 w-4" />
-                        <span className="flex-1">{label}</span>
-                        <Badge>{phase}</Badge>
-                    </div>
-                ))}
-            </div>
         </nav>
     );
 }
