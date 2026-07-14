@@ -185,6 +185,24 @@ export function NeuralCore({
                 viewBox="0 0 100 100"
                 className="h-full w-full overflow-visible"
             >
+                {/* Static star heart + corona */}
+                <circle
+                    cx={50}
+                    cy={50}
+                    r={7}
+                    fill="var(--primary)"
+                    fillOpacity={0.9}
+                />
+                <circle
+                    cx={50}
+                    cy={50}
+                    r={11}
+                    fill="none"
+                    stroke="var(--primary)"
+                    strokeOpacity={0.25}
+                    strokeWidth={1}
+                />
+
                 {/* Edges */}
                 {edges.map((edge, i) => {
                     const a = seed[edge[0]]!;
