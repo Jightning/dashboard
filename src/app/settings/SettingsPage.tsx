@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRuntime } from "@/app/runtime";
 import { settingsSchema, type Settings } from "@/ai/providers/keys";
 import {
@@ -6,7 +6,9 @@ import {
     SUGGESTED_MODELS,
     type ProviderId,
 } from "@/ai/providers/registry";
-import { availableProviders } from "@/lib/env";
+import { availableProviders, isTauri } from "@/lib/env";
+import { runDailyBackup, exportNotesMarkdown } from "@/lib/backup";
+import { usageByDay, type DailyUsage } from "@/db/repo/usage";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
@@ -16,6 +18,31 @@ export function SettingsPage() {
     const { settingsStore, settings, refreshSettings } = useRuntime();
     const [form, setForm] = useState<Settings>(settings);
     const [saved, setSaved] = useState(false);
+    const [backupStatus, setBackupStatus] = useState<string | null>(null);
+    const [usage, setUsage] = useState<DailyUsage[]>([]);
+
+    useEffect(() => {
+        usageByDay(14).then(setUsage).catch((e) => console.error(e));
+    }, []);
+
+    const backUpNow = async () => {
+        setBackupStatus("backing up…");
+        try {
+            const path = await runDailyBackup();
+            setBackupStatus(path ? `backed up to ${path}` : "already backed up today");
+        } catch (e) {
+            setBackupStatus(`backup failed: ${e instanceof Error ? e.message : String(e)}`);
+        }
+    };
+
+    const exportNotes = async () => {
+        const blob = await exportNotesMarkdown();
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = `notes-${new Date().toISOString().slice(0, 10)}.md`;
+        a.click();
+        URL.revokeObjectURL(a.href);
+    };
 
     const set = <K extends keyof Settings>(key: K, value: Settings[K]) => {
         setSaved(false);
@@ -167,6 +194,71 @@ export function SettingsPage() {
                         </span>
                     )}
                 </div>
+
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Data</CardTitle>
+                        <p className="text-xs text-muted-foreground">
+                            Daily backups run automatically on launch. Export
+                            is a manual escape hatch that works on any target.
+                        </p>
+                    </CardHeader>
+                    <CardContent className="flex flex-col gap-3">
+                        <div className="flex flex-wrap items-center gap-3">
+                            {isTauri() && (
+                                <Button variant="outline" onClick={backUpNow}>
+                                    Back up now
+                                </Button>
+                            )}
+                            <Button variant="outline" onClick={exportNotes}>
+                                Export notes (.md)
+                            </Button>
+                        </div>
+                        {backupStatus && (
+                            <span className="font-mono text-xs text-muted-foreground">
+                                {backupStatus}
+                            </span>
+                        )}
+                    </CardContent>
+                </Card>
+
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Usage</CardTitle>
+                        <p className="text-xs text-muted-foreground">
+                            Gemini free tier resets daily; Ollama is always
+                            $0.
+                        </p>
+                    </CardHeader>
+                    <CardContent>
+                        {usage.length === 0 ? (
+                            <p className="text-xs text-muted-foreground">
+                                No token usage recorded yet.
+                            </p>
+                        ) : (
+                            <table className="w-full font-mono text-xs">
+                                <thead>
+                                    <tr className="text-left text-muted-foreground">
+                                        <th className="pr-4 pb-1 font-medium">day</th>
+                                        <th className="pr-4 pb-1 font-medium">model</th>
+                                        <th className="pr-4 pb-1 font-medium">in</th>
+                                        <th className="pb-1 font-medium">out</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {usage.map((row) => (
+                                        <tr key={`${row.day}-${row.model}`}>
+                                            <td className="pr-4 py-0.5">{row.day}</td>
+                                            <td className="pr-4 py-0.5">{row.model}</td>
+                                            <td className="pr-4 py-0.5">{row.inputTokens}</td>
+                                            <td className="py-0.5">{row.outputTokens}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        )}
+                    </CardContent>
+                </Card>
             </div>
         </div>
     );

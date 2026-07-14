@@ -19,7 +19,7 @@ export interface BootResult {
 
 let bootPromise: Promise<BootResult> | null = null;
 
-/**
+/*
  * Runs once at startup: DB (incl. FTS5 check), settings, idempotent seeds.
  * Branches on isTauri() to pick the desktop (SQLite via Rust) or web (WASM
  * SQLite + OPFS) backends — every other module only ever sees DbClient/
@@ -52,6 +52,10 @@ async function runBootstrap(): Promise<BootResult> {
         model: settings.defaultModel,
         routerModel: settings.routerModel,
     });
+
+    void import("@/lib/backup").then(({ runDailyBackup }) =>
+        runDailyBackup().catch((e) => console.error("daily backup failed:", e)),
+    );
 
     return { settingsStore, settings };
 }
