@@ -55,7 +55,7 @@ export function TasksPage() {
                 <QuickAdd courses={courses} onAdd={(input) => act(() => tasksRepo.createTask(input))} />
                 <TaskList tasks={tasks} courses={courses} act={act} />
                 <WeekEvents events={events} courses={courses} />
-                <CoursesPanel courses={courses} act={act} />
+                <CoursesPanel courses={courses} act={act} reload={reload} />
             </div>
         </div>
     );
@@ -72,18 +72,24 @@ function QuickAdd({
     const [due, setDue] = useState("");
     const [courseId, setCourseId] = useState("");
     const [recurrence, setRecurrence] = useState("");
+    const [submitting, setSubmitting] = useState(false);
 
     const submit = async () => {
-        if (!title.trim()) return;
-        await onAdd({
-            title: title.trim(),
-            courseId: courseId || null,
-            dueAt: due ? new Date(due).getTime() : null,
-            recurrence: (recurrence || null) as Recurrence | null,
-        });
-        setTitle("");
-        setDue("");
-        setRecurrence("");
+        if (!title.trim() || submitting) return;
+        setSubmitting(true);
+        try {
+            await onAdd({
+                title: title.trim(),
+                courseId: courseId || null,
+                dueAt: due ? new Date(due).getTime() : null,
+                recurrence: (recurrence || null) as Recurrence | null,
+            });
+            setTitle("");
+            setDue("");
+            setRecurrence("");
+        } finally {
+            setSubmitting(false);
+        }
     };
 
     return (
@@ -94,7 +100,10 @@ function QuickAdd({
                     value={title}
                     placeholder="e.g. ECE 437 lab 3 report"
                     onChange={(e) => setTitle(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && void submit()}
+                    onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.repeat && !submitting)
+                            void submit();
+                    }}
                 />
             </label>
             <label className="flex flex-col gap-1 text-sm">
@@ -131,7 +140,11 @@ function QuickAdd({
                     <option value="monthly">monthly</option>
                 </Select>
             </label>
-            <Button onClick={() => void submit()} aria-label="Add task">
+            <Button
+                onClick={() => void submit()}
+                disabled={submitting}
+                aria-label="Add task"
+            >
                 <Plus className="h-4 w-4" />
             </Button>
         </div>
@@ -257,13 +270,16 @@ function WeekEvents({
 function CoursesPanel({
     courses,
     act,
+    reload,
 }: {
     courses: Course[];
     act: (fn: () => Promise<unknown>) => Promise<void>;
+    reload: () => Promise<void>;
 }) {
     const [code, setCode] = useState("");
     const [name, setName] = useState("");
     const [term, setTerm] = useState("Fall 2026");
+    const [color, setColor] = useState("");
     const [importing, setImporting] = useState<string | null>(null);
     const [importResult, setImportResult] = useState<string | null>(null);
 
@@ -272,9 +288,16 @@ function CoursesPanel({
             if (!code.trim() || !name.trim())
                 throw new Error("course needs a code and a name");
             const folder = `/school/${code.toLowerCase().replace(/[^a-z0-9]+/g, "")}`;
-            await coursesRepo.createCourse({ code, name, term, folder });
+            await coursesRepo.createCourse({
+                code,
+                name,
+                term,
+                folder,
+                color: color.trim() || null,
+            });
             setCode("");
             setName("");
+            setColor("");
         });
 
     // ICS import works on both targets via a plain file input.
@@ -292,6 +315,7 @@ function CoursesPanel({
                 until,
             });
             setImportResult(`${course.code}: imported ${count} events`);
+            await reload();
         } catch (e) {
             setImportResult(e instanceof Error ? e.message : String(e));
         } finally {
@@ -373,6 +397,14 @@ function CoursesPanel({
                         <Input
                             value={term}
                             onChange={(e) => setTerm(e.target.value)}
+                        />
+                    </label>
+                    <label className="flex w-32 flex-col gap-1 text-sm">
+                        Color (optional)
+                        <Input
+                            value={color}
+                            placeholder="#3b82f6"
+                            onChange={(e) => setColor(e.target.value)}
                         />
                     </label>
                     <Button onClick={() => void addCourse()}>Add</Button>
