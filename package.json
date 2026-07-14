@@ -21,7 +21,7 @@
         "@ai-sdk/react": "^4.0.16",
         "@fontsource-variable/jetbrains-mono": "^5.2.8",
         "@fontsource-variable/space-grotesk": "^5.2.10",
-        "@fontsource/orbitron": "^5.2.8",
+        "@fontsource/cinzel": "^5.2.8",
         "@sqlite.org/sqlite-wasm": "^3.53.0-build1",
         "@tauri-apps/api": "^2.11.1",
         "@tauri-apps/plugin-dialog": "^2.7.1",
