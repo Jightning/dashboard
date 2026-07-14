@@ -3,6 +3,7 @@ import { noteScopeResolvers } from "./notes";
 import { webScopeResolvers } from "./web";
 import { taskScopeResolvers } from "./tasks";
 import { applicationScopeResolvers } from "./applications";
+import { flashcardScopeResolvers } from "./flashcards";
 import type { ScopeResolver } from "./context";
 
 /**
@@ -15,4 +16,5 @@ export const scopeResolvers: Record<string, ScopeResolver> = {
     ...webScopeResolvers,
     ...taskScopeResolvers,
     ...applicationScopeResolvers,
+    ...flashcardScopeResolvers,
 };
