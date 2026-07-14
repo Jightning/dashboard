@@ -5,6 +5,7 @@ import { HomePage } from "./home/HomePage";
 import { ChatPage } from "./chat/ChatPage";
 import { AgentsPage } from "./agents/AgentsPage";
 import { NotesPage } from "./notes/NotesPage";
+import { TasksPage } from "./tasks/TasksPage";
 import { SettingsPage } from "./settings/SettingsPage";
 import { PresetsPage } from "./presets/PresetsPage";
 import { PermissionsPage } from "./permissions/PermissionsPage";
@@ -17,6 +18,7 @@ const PAGES: Record<Page, () => React.JSX.Element> = {
     chat: ChatPage,
     agents: AgentsPage,
     notes: NotesPage,
+    tasks: TasksPage,
     presets: PresetsPage,
     permissions: PermissionsPage,
     settings: SettingsPage,

@@ -19,6 +19,7 @@ export type Page =
     | "chat"
     | "agents"
     | "notes"
+    | "tasks"
     | "presets"
     | "permissions"
     | "settings";
@@ -40,7 +41,10 @@ const SECTIONS: { heading: string; items: NavItem[] }[] = [
     },
     {
         heading: "Workspace",
-        items: [{ page: "notes", label: "Notes", icon: NotebookPen }],
+        items: [
+            { page: "notes", label: "Notes", icon: NotebookPen },
+            { page: "tasks", label: "Tasks", icon: CalendarCheck },
+        ],
     },
     {
         heading: "Config",
@@ -56,7 +60,6 @@ const SECTIONS: { heading: string; items: NavItem[] }[] = [
 const SOON: { label: string; phase: string; icon: typeof MessageSquare }[] = [
     { label: "Bookmarks", phase: "P3", icon: Bookmark },
     { label: "Snippets", phase: "P3", icon: ScrollText },
-    { label: "Tasks", phase: "P4", icon: CalendarCheck },
 ];
 
 export function Sidebar({
