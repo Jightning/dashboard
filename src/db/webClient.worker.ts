@@ -4,10 +4,11 @@
  * thread talks to this file over postMessage; see webClient.ts.
  */
 import sqlite3InitModule from "@sqlite.org/sqlite-wasm";
+import { planMigrations, type MigrationFile } from "./migrationPlan";
 
-/** Every migration's raw SQL, in filename order — same files tauriClient.ts
- * (via Rust) and testClient.ts both run, so the schema is defined once. */
-const migrationSql: string[] = Object.entries(
+/** Every migration file, in filename order — same files tauriClient.ts (via
+ * Rust) and testClient.ts both run, so the schema is defined once. */
+const migrationFiles: MigrationFile[] = Object.entries(
     import.meta.glob("../../src-tauri/migrations/*.sql", {
         query: "?raw",
         import: "default",
@@ -15,7 +16,7 @@ const migrationSql: string[] = Object.entries(
     }) as Record<string, string>,
 )
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([, sql]) => sql);
+    .map(([path, sql]) => ({ version: path.split("/").pop()!, sql }));
 
 const DB_FILE = "/dashboard.db";
 
@@ -32,7 +33,6 @@ async function main() {
         name: "dashboard-opfs",
     });
 
-    const isNewDb = !poolUtil.getFileNames().includes(DB_FILE);
     const db = new poolUtil.OpfsSAHPoolDb(DB_FILE);
 
     // SQLite defaults foreign keys OFF per connection; enable so ON DELETE
@@ -51,8 +51,33 @@ async function main() {
         );
     }
 
-    if (isNewDb) {
-        for (const sql of migrationSql) db.exec(sql);
+    // Bookkeeping table so migrations added after a database was first
+    // created still get applied on next launch, not just for brand-new DBs.
+    db.exec("CREATE TABLE IF NOT EXISTS _migrations (version TEXT PRIMARY KEY)");
+    const appliedVersions = new Set(
+        (
+            db.exec({
+                sql: "SELECT version FROM _migrations",
+                rowMode: "object",
+                returnValue: "resultRows",
+            }) as { version: string }[]
+        ).map((r) => r.version),
+    );
+    const existingTables = new Set(
+        (
+            db.exec({
+                sql: "SELECT name FROM sqlite_master WHERE type = 'table'",
+                rowMode: "object",
+                returnValue: "resultRows",
+            }) as { name: string }[]
+        ).map((r) => r.name),
+    );
+    for (const entry of planMigrations(migrationFiles, appliedVersions, existingTables)) {
+        if (entry.run) db.exec(entry.sql);
+        db.exec({
+            sql: "INSERT INTO _migrations (version) VALUES (?)",
+            bind: [entry.version],
+        });
     }
 
     self.postMessage({ type: "ready" });
