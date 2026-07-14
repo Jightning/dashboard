@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 /* ============================================================================
-   AI OS design tokens — HUD / sci-fi FUI, dark-committed.
+   Observatory Atlas design tokens — indigo photographic plate, warm starlight.
    Single source of truth: components must consume these tokens (via the
    Tailwind theme below or var()) — never raw hex/oklch values.
    Full guide: docs/design.md
