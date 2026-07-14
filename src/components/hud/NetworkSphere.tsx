@@ -92,6 +92,7 @@ export function NetworkSphere({
     const hitEls = useRef<(SVGCircleElement | null)[]>([]);
     const labelEls = useRef<(SVGTextElement | null)[]>([]);
     const edgeEls = useRef<(SVGLineElement | null)[]>([]);
+    const spikeEls = useRef<(SVGGElement | null)[]>([]);
     const cardRef = useRef<HTMLDivElement | null>(null);
 
     // One projection + attribute-write pass at the current orientation. Shared
@@ -129,6 +130,18 @@ export function NetworkSphere({
                     c.setAttribute("r", String(node.r * rScale));
                     c.setAttribute("fill-opacity", String(op));
                 }
+                const spike = spikeEls.current[i];
+                if (spike) {
+                    const len = node.r * rScale * 3.2;
+                    spike.setAttribute(
+                        "transform",
+                        `translate(${p.cx} ${p.cy}) scale(${len})`,
+                    );
+                    // Slightly dimmer than the star body; vanishes with depth like everything else.
+                    spike.setAttribute("stroke-opacity", String(op * 0.55));
+                    // Keep hairline weight constant regardless of scale.
+                    spike.setAttribute("stroke-width", String(0.4 / len));
+                }
                 const hit = hitEls.current[i];
                 if (hit) {
                     hit.setAttribute("cx", String(p.cx));
@@ -164,7 +177,9 @@ export function NetworkSphere({
                 let eop = 0.05 + 0.28 * ((a.depth + b.depth) / 2);
                 if (hoveredRoot && !focus) eop *= 0.18;
                 else if (hoveredRoot && focus) eop = Math.min(0.6, eop * 2.2);
-                l.setAttribute("stroke-opacity", String(eop));
+                // Constellation lines read as faint engraved hairlines, not
+                // colored wires — scale into a ~0.04–0.18 range.
+                l.setAttribute("stroke-opacity", String(eop * 0.7));
             }
 
             // Track the pointer-hovered node with the info card.
@@ -304,7 +319,17 @@ export function NetworkSphere({
                 viewBox="0 0 100 100"
                 className="absolute inset-0 h-full w-full overflow-visible"
             >
-                {/* Edges */}
+                {/* Graticule ring — the star-atlas chart circle, framing the sphere */}
+                <circle
+                    cx={50}
+                    cy={50}
+                    r={RADIUS}
+                    fill="none"
+                    stroke="var(--grid-line)"
+                    strokeWidth={0.3}
+                />
+
+                {/* Edges — constellation lines, a single hairline color */}
                 {edgePairs.map((e, i) => (
                     <line
                         key={i}
@@ -315,11 +340,30 @@ export function NetworkSphere({
                         y1={seed[e.ai]!.cy}
                         x2={seed[e.bi]!.cx}
                         y2={seed[e.bi]!.cy}
-                        stroke={nodes[e.ai]!.color}
+                        stroke="var(--constellation-line)"
                         strokeOpacity={0.15}
-                        strokeWidth={0.5}
+                        strokeWidth={0.35}
                     />
                 ))}
+
+                {/* Diffraction spikes — primary stars only, positioned by the rAF loop */}
+                {nodes.map((n, i) =>
+                    n.primary ? (
+                        <g
+                            key={`spike-${n.id}`}
+                            ref={(el) => {
+                                spikeEls.current[i] = el;
+                            }}
+                            transform={`translate(${seed[i]!.cx} ${seed[i]!.cy}) scale(${n.r * 3.2})`}
+                            stroke={n.color}
+                            strokeWidth={0.4 / (n.r * 3.2)}
+                            strokeOpacity={0.35 + 0.65 * seed[i]!.depth}
+                        >
+                            <line x1={-1} y1={0} x2={1} y2={0} />
+                            <line x1={0} y1={-1} x2={0} y2={1} />
+                        </g>
+                    ) : null,
+                )}
 
                 {/* Visible nodes (non-interactive; hit circles handle events) */}
                 {nodes.map((n, i) => (
@@ -350,12 +394,12 @@ export function NetworkSphere({
                         className="pointer-events-none select-none font-mono uppercase"
                         style={{
                             fontSize: n.primary ? 3 : 2.4,
-                            letterSpacing: "0.05em",
+                            letterSpacing: "0.12em",
                             fill: n.color,
                         }}
                         opacity={0}
                     >
-                        {truncate(n.label)}
+                        {truncate(n.label).toUpperCase()}
                     </text>
                 ))}
 
@@ -407,7 +451,7 @@ function HoverContent({ node }: { node: NetworkNode }) {
     return (
         <div className="flex flex-col gap-1">
             <div
-                className="font-mono text-[11px] font-semibold"
+                className="font-mono text-[11px] font-semibold tracking-wider uppercase"
                 style={{ color: node.color }}
             >
                 {meta.title}
