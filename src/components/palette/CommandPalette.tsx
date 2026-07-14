@@ -58,18 +58,27 @@ export function CommandPalette({
     // Fan out searches; tasks/applications are small enough to filter client-side.
     useEffect(() => {
         if (!open) return;
+        let cancelled = false;
         const q = query.trim();
         void (async () => {
-            setTasks((await listOpenTasks()).slice(0, 30));
-            setApps((await listApplications()).slice(0, 30));
+            const tasks = (await listOpenTasks()).slice(0, 30);
+            if (!cancelled) setTasks(tasks);
+            const apps = (await listApplications()).slice(0, 30);
+            if (!cancelled) setApps(apps);
             if (q.length >= 2) {
-                setNotes(await searchNotes(q, { limit: 6 }));
-                setLibraryHits(await searchLibrary(q));
+                const notes = await searchNotes(q, { limit: 6 });
+                if (!cancelled) setNotes(notes);
+                const libraryHits = await searchLibrary(q);
+                if (!cancelled) setLibraryHits(libraryHits);
             } else {
-                setNotes([]);
-                setLibraryHits(await searchLibrary(""));
+                if (!cancelled) setNotes([]);
+                const libraryHits = await searchLibrary("");
+                if (!cancelled) setLibraryHits(libraryHits);
             }
         })();
+        return () => {
+            cancelled = true;
+        };
     }, [open, query]);
 
     const close = () => {
