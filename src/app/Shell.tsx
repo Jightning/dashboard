@@ -14,6 +14,7 @@ import { PresetsPage } from "./presets/PresetsPage";
 import { PermissionsPage } from "./permissions/PermissionsPage";
 import { GridBackground } from "@/components/hud/GridBackground";
 import { StatusBar } from "@/components/hud/StatusBar";
+import { CommandPalette } from "@/components/palette/CommandPalette";
 import { useRuntime } from "./runtime";
 
 const PAGES: Record<Page, () => React.JSX.Element> = {
@@ -64,6 +65,7 @@ export function Shell() {
                     {settings.defaultProvider}/{settings.defaultModel}
                 </span>
             </StatusBar>
+            <CommandPalette onNavigate={setPage} />
         </div>
     );
 }

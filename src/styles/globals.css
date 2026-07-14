@@ -322,6 +322,15 @@ body {
     padding: 0.4em 0.7em;
 }
 
+[cmdk-group-heading] {
+    padding: 0.25rem 0.75rem;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--muted-foreground);
+}
+
 /* Ambient/looping motion is decoration — kill it for reduced-motion users.
    One-shot enter/exit transitions (motion lib) honor this via useReducedMotion. */
 @media (prefers-reduced-motion: reduce) {
