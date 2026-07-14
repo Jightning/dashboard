@@ -2,6 +2,7 @@ import {
     Bookmark,
     Briefcase,
     CalendarCheck,
+    GraduationCap,
     LayoutDashboard,
     MessageSquare,
     Network,
@@ -22,6 +23,7 @@ export type Page =
     | "notes"
     | "tasks"
     | "applications"
+    | "review"
     | "presets"
     | "permissions"
     | "settings";
@@ -47,6 +49,7 @@ const SECTIONS: { heading: string; items: NavItem[] }[] = [
             { page: "notes", label: "Notes", icon: NotebookPen },
             { page: "tasks", label: "Tasks", icon: CalendarCheck },
             { page: "applications", label: "Applications", icon: Briefcase },
+            { page: "review", label: "Review", icon: GraduationCap },
         ],
     },
     {

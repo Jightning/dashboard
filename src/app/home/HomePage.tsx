@@ -7,6 +7,7 @@ import { listPresets } from "@/db/repo/presets";
 import { listOpenTasks } from "@/db/repo/tasks";
 import { listEventsBetween } from "@/db/repo/events";
 import { listFollowUpsDue } from "@/db/repo/applications";
+import { countDueFlashcards } from "@/db/repo/flashcards";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { NeuralCore } from "@/components/hud/NeuralCore";
@@ -42,6 +43,7 @@ export function HomePage() {
         events: CalendarEvent[];
         dueTasks: Task[];
         followUps: Application[];
+        reviewDue: number;
     } | null>(null);
 
     useEffect(() => {
@@ -65,6 +67,7 @@ export function HomePage() {
                 ),
                 dueTasks: await listOpenTasks({ dueBefore: endOfToday() + 2 * DAY }),
                 followUps: await listFollowUpsDue(endOfToday()),
+                reviewDue: await countDueFlashcards(Date.now()),
             });
         })();
     }, []);
@@ -188,6 +191,13 @@ export function HomePage() {
                                 <span className="text-xs text-muted-foreground">
                                     Nothing due. Suspicious — check the Tasks
                                     page.
+                                </span>
+                            )}
+                            {today && (
+                                <span className="mt-1 font-mono text-[10px] uppercase tracking-wider text-primary">
+                                    {today.reviewDue > 0
+                                        ? `${today.reviewDue} flashcards due`
+                                        : "reviews clear"}
                                 </span>
                             )}
                         </Card>
