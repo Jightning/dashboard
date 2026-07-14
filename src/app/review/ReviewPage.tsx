@@ -26,6 +26,7 @@ export function ReviewPage() {
     const [dueCount, setDueCount] = useState(0);
     const [revealed, setRevealed] = useState(false);
     const [reviewed, setReviewed] = useState(0);
+    const [grading, setGrading] = useState(false);
 
     const reload = useCallback(async () => {
         setQueue(await listDueFlashcards(Date.now()));
@@ -40,12 +41,17 @@ export function ReviewPage() {
 
     const grade = useCallback(
         async (g: Grade) => {
-            if (!card || !revealed) return;
-            await applyReview(card.id, g);
-            setReviewed((n) => n + 1);
-            await reload();
+            if (!card || !revealed || grading) return;
+            setGrading(true);
+            try {
+                await applyReview(card.id, g);
+                setReviewed((n) => n + 1);
+                await reload();
+            } finally {
+                setGrading(false);
+            }
         },
-        [card, revealed, reload],
+        [card, revealed, grading, reload],
     );
 
     // Keyboard-first: space reveals, 1-4 grade.
@@ -131,6 +137,7 @@ export function ReviewPage() {
                                                       : "outline"
                                             }
                                             className="flex-1"
+                                            disabled={grading}
                                             onClick={() => void grade(g.grade)}
                                         >
                                             {g.label}
