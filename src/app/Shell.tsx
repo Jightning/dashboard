@@ -6,6 +6,7 @@ import { ChatPage } from "./chat/ChatPage";
 import { AgentsPage } from "./agents/AgentsPage";
 import { NotesPage } from "./notes/NotesPage";
 import { TasksPage } from "./tasks/TasksPage";
+import { ApplicationsPage } from "./applications/ApplicationsPage";
 import { SettingsPage } from "./settings/SettingsPage";
 import { PresetsPage } from "./presets/PresetsPage";
 import { PermissionsPage } from "./permissions/PermissionsPage";
@@ -19,6 +20,7 @@ const PAGES: Record<Page, () => React.JSX.Element> = {
     agents: AgentsPage,
     notes: NotesPage,
     tasks: TasksPage,
+    applications: ApplicationsPage,
     presets: PresetsPage,
     permissions: PermissionsPage,
     settings: SettingsPage,

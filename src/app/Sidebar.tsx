@@ -1,5 +1,6 @@
 import {
     Bookmark,
+    Briefcase,
     CalendarCheck,
     LayoutDashboard,
     MessageSquare,
@@ -20,6 +21,7 @@ export type Page =
     | "agents"
     | "notes"
     | "tasks"
+    | "applications"
     | "presets"
     | "permissions"
     | "settings";
@@ -44,6 +46,7 @@ const SECTIONS: { heading: string; items: NavItem[] }[] = [
         items: [
             { page: "notes", label: "Notes", icon: NotebookPen },
             { page: "tasks", label: "Tasks", icon: CalendarCheck },
+            { page: "applications", label: "Applications", icon: Briefcase },
         ],
     },
     {

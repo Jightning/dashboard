@@ -6,11 +6,12 @@ import { listNotes } from "@/db/repo/notes";
 import { listPresets } from "@/db/repo/presets";
 import { listOpenTasks } from "@/db/repo/tasks";
 import { listEventsBetween } from "@/db/repo/events";
+import { listFollowUpsDue } from "@/db/repo/applications";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { NeuralCore } from "@/components/hud/NeuralCore";
 import { Typewriter } from "@/components/hud/Typewriter";
-import type { CalendarEvent, Task } from "@/lib/schemas";
+import type { Application, CalendarEvent, Task } from "@/lib/schemas";
 
 interface HomeStats {
     sessions: number;
@@ -40,6 +41,7 @@ export function HomePage() {
     const [today, setToday] = useState<{
         events: CalendarEvent[];
         dueTasks: Task[];
+        followUps: Application[];
     } | null>(null);
 
     useEffect(() => {
@@ -62,6 +64,7 @@ export function HomePage() {
                     endOfToday(),
                 ),
                 dueTasks: await listOpenTasks({ dueBefore: endOfToday() + 2 * DAY }),
+                followUps: await listFollowUpsDue(endOfToday()),
             });
         })();
     }, []);
@@ -117,7 +120,7 @@ export function HomePage() {
                     <h2 className="mb-3 font-mono text-xs uppercase tracking-[0.18em] text-muted-foreground">
                         Today
                     </h2>
-                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
                         <Card corners className="flex flex-col gap-2 p-4">
                             <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
                                 schedule
@@ -185,6 +188,35 @@ export function HomePage() {
                                 <span className="text-xs text-muted-foreground">
                                     Nothing due. Suspicious — check the Tasks
                                     page.
+                                </span>
+                            )}
+                        </Card>
+                        <Card corners className="flex flex-col gap-2 p-4">
+                            <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                                follow-ups due
+                            </span>
+                            {today?.followUps.length ? (
+                                today.followUps.map((a) => (
+                                    <div
+                                        key={a.id}
+                                        className="flex items-center gap-2 text-sm"
+                                    >
+                                        <span className="flex-1 truncate">
+                                            {a.company} — {a.next_action}
+                                        </span>
+                                        <Badge tone="warning">
+                                            {new Date(
+                                                a.next_action_at!,
+                                            ).toLocaleDateString(undefined, {
+                                                month: "short",
+                                                day: "numeric",
+                                            })}
+                                        </Badge>
+                                    </div>
+                                ))
+                            ) : (
+                                <span className="text-xs text-muted-foreground">
+                                    All caught up.
                                 </span>
                             )}
                         </Card>
