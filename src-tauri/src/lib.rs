@@ -44,6 +44,12 @@ pub fn migrations() -> Vec<Migration> {
             sql: include_str!("../migrations/0007_applications.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 8,
+            description: "flashcards",
+            sql: include_str!("../migrations/0008_flashcards.sql"),
+            kind: MigrationKind::Up,
+        },
     ]
 }
 

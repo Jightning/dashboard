@@ -278,3 +278,19 @@ export const applicationEventSchema = z.object({
     created_at: z.number(),
 });
 export type ApplicationEvent = z.infer<typeof applicationEventSchema>;
+
+export const flashcardSchema = z.object({
+    id: z.string(),
+    folder: z.string(),
+    front: z.string(),
+    back: z.string(),
+    source_note_id: z.string().nullable(),
+    ease: z.number(),
+    interval_days: z.number(),
+    reps: z.number(),
+    due_at: z.number(),
+    suspended: sqlBool,
+    created_at: z.number(),
+    updated_at: z.number(),
+});
+export type Flashcard = z.infer<typeof flashcardSchema>;
