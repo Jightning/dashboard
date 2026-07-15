@@ -67,6 +67,10 @@ export function InstancesSidebar({
     const [renamingId, setRenamingId] = useState<string | null>(null);
     const [draftTitle, setDraftTitle] = useState("");
     const rowRefs = useRef<Record<string, HTMLDivElement | null>>({});
+    // Enter/Escape commit or cancel the rename synchronously and unmount the
+    // input, which fires a native blur on the way out. This ref lets onBlur
+    // recognize "already handled by keydown" so it doesn't fire onRename again.
+    const renameHandledRef = useRef(false);
 
     const presetById = new Map(presets.map((p) => [p.id, p]));
     const levelById = new Map(levels.map((l) => [l.id, l]));
@@ -207,12 +211,20 @@ export function InstancesSidebar({
                                         onChange={(e) => setDraftTitle(e.target.value)}
                                         onKeyDown={(e) => {
                                             if (e.key === "Enter") {
+                                                renameHandledRef.current = true;
                                                 onRename(s, draftTitle.trim() || s.title);
                                                 setRenamingId(null);
                                             }
-                                            if (e.key === "Escape") setRenamingId(null);
+                                            if (e.key === "Escape") {
+                                                renameHandledRef.current = true;
+                                                setRenamingId(null);
+                                            }
                                         }}
                                         onBlur={() => {
+                                            if (renameHandledRef.current) {
+                                                renameHandledRef.current = false;
+                                                return;
+                                            }
                                             onRename(s, draftTitle.trim() || s.title);
                                             setRenamingId(null);
                                         }}
@@ -258,6 +270,7 @@ export function InstancesSidebar({
                                         <IconButton
                                             label="Rename chat"
                                             onClick={() => {
+                                                renameHandledRef.current = false;
                                                 setRenamingId(s.id);
                                                 setDraftTitle(s.title);
                                             }}
