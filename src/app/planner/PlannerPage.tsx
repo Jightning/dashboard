@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { cn } from "@/lib/utils";
 import { TabBar } from "@/components/ui/tabs";
 import { TasksTab } from "./TasksTab";
 import { CalendarTab } from "./CalendarTab";
@@ -34,6 +35,13 @@ export function PlannerPage({ tab }: { tab?: string } = {}) {
                     </p>
                 </header>
                 <TabBar tabs={TABS} active={active} onSelect={setActive} />
+            </div>
+            <div
+                className={cn(
+                    "mx-auto mt-6 flex flex-col gap-6",
+                    active === "applications" ? "max-w-6xl" : "max-w-3xl",
+                )}
+            >
                 {active === "tasks" && <TasksTab />}
                 {active === "calendar" && <CalendarTab />}
                 {active === "applications" && <ApplicationsTab />}
