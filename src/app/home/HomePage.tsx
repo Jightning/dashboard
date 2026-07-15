@@ -81,7 +81,8 @@ export function HomePage() {
                             <Typewriter text={greeting()} />
                         </h1>
                         <p className="mt-1 text-sm text-muted-foreground">
-                            All systems nominal — awaiting directive.
+                            Clear skies. The plate is developed — what are we
+                            looking for?
                         </p>
                     </div>
                     <div className="font-mono text-xs uppercase tracking-wider text-muted-foreground">

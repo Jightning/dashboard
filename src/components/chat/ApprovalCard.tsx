@@ -23,7 +23,7 @@ export function ApprovalCards({ broker }: { broker: ApprovalBroker }) {
                     initial={{ opacity: 0, scale: 0.96 }}
                     animate={{ opacity: 1, scale: 1 }}
                     transition={{ duration: 0.25, ease: [0.34, 1.4, 0.64, 1] }}
-                    className="hud-panel hud-corners border-warning/50 p-4 shadow-[0_0_18px_oklch(0.79_0.14_80/20%)]"
+                    className="hud-panel hud-corners border-warning/50 p-4 shadow-[0_0_18px_color-mix(in_oklab,var(--warning)_20%,transparent)]"
                     style={
                         {
                             "--corner-color": "var(--warning)",

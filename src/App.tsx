@@ -12,11 +12,11 @@ function BootScreen() {
     return (
         <div className="flex h-screen flex-col items-center justify-center gap-5">
             <NeuralCore size={260} state="thinking" />
-            <div className="font-display text-glow text-xl font-bold tracking-[0.25em] text-primary">
-                Hugh
+            <div className="font-display text-xl font-bold tracking-[0.25em] text-primary">
+                HUGH
             </div>
             <div className="h-4 font-mono text-[11px] uppercase tracking-[0.2em] text-muted-foreground">
-                <Typewriter text="migrating db · loading keys · linking providers" />
+                <Typewriter text="developing the plate · charting constellations · syncing the ephemeris" />
             </div>
         </div>
     );

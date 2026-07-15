@@ -72,11 +72,24 @@ export function Sidebar({
     return (
         <nav className="flex w-52 shrink-0 flex-col border-r border-border bg-background/85">
             <div className="px-4 pb-4 pt-5">
-                <div className="font-display text-glow text-lg font-bold tracking-[0.2em] text-primary">
-                    Hugh
+                <div className="flex items-center gap-2">
+                    <svg
+                        aria-hidden
+                        viewBox="0 0 12 12"
+                        className="h-3 w-3 text-primary"
+                    >
+                        {/* Four-point star — the app's mark, echoing the globe's spikes */}
+                        <path
+                            fill="currentColor"
+                            d="M6 0 L7.1 4.9 L12 6 L7.1 7.1 L6 12 L4.9 7.1 L0 6 L4.9 4.9 Z"
+                        />
+                    </svg>
+                    <div className="font-display text-lg font-semibold tracking-[0.25em] text-primary">
+                        HUGH
+                    </div>
                 </div>
                 <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-                    personal dashboard
+                    personal observatory
                 </div>
             </div>
 
