@@ -205,10 +205,8 @@ describe("permission levels + grants", () => {
         await permissions.seedBuiltinLevels();
         await permissions.seedBuiltinLevels();
         const levels = await permissions.listLevels();
-        expect(levels.map((l) => l.name).sort()).toEqual([
-            "Ask everything",
-            "Read documents",
-        ]);
+        // seed test: only Read documents is a builtin row now; "Ask everything" is NULL
+        expect(levels.map((l) => l.name)).toEqual(["Read documents"]);
 
         const grants = await permissions.listGrants(
             permissions.BUILTIN_LEVELS.readDocuments,
@@ -242,7 +240,7 @@ describe("permission levels + grants", () => {
     it("refuses to delete built-in levels", async () => {
         await permissions.seedBuiltinLevels();
         await expect(
-            permissions.deleteLevel(permissions.BUILTIN_LEVELS.askEverything),
+            permissions.deleteLevel(permissions.BUILTIN_LEVELS.readDocuments),
         ).rejects.toThrow(/built-in/);
     });
 });

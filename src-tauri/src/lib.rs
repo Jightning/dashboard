@@ -56,6 +56,12 @@ pub fn migrations() -> Vec<Migration> {
             sql: include_str!("../migrations/0009_library.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 10,
+            description: "collapse Ask-everything level into NULL",
+            sql: include_str!("../migrations/0010_permission_cleanup.sql"),
+            kind: MigrationKind::Up,
+        },
     ]
 }
 

@@ -6,6 +6,7 @@ import { listLevels } from "@/db/repo/permissions";
 import { runAutomation } from "@/ai/automations/run";
 import { appFetch } from "@/ai/providers/appFetch";
 import { useRuntime } from "@/app/runtime";
+import { PermissionLevelSelect } from "@/components/PermissionLevelSelect";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
@@ -350,22 +351,14 @@ function AutomationEditor({
                 <div className="flex gap-3">
                     <label className="flex flex-1 flex-col gap-1 text-sm">
                         Permission level (out-of-level calls are denied)
-                        <Select
-                            value={form.permissionLevelId ?? ""}
-                            onChange={(e) =>
-                                setForm({
-                                    ...form,
-                                    permissionLevelId: e.target.value || null,
-                                })
+                        <PermissionLevelSelect
+                            levels={levels}
+                            value={form.permissionLevelId ?? null}
+                            nullLabel="None (deny all tool calls)"
+                            onChange={(id) =>
+                                setForm({ ...form, permissionLevelId: id })
                             }
-                        >
-                            <option value="">None (deny all tool calls)</option>
-                            {levels.map((l) => (
-                                <option key={l.id} value={l.id}>
-                                    {l.name}
-                                </option>
-                            ))}
-                        </Select>
+                        />
                     </label>
                     <label className="flex flex-1 flex-col gap-1 text-sm">
                         Save output as note in folder (blank = don't)

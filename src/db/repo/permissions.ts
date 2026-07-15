@@ -11,22 +11,11 @@ import {
 
 /** Stable ids so seeding is idempotent and presets can reference them. */
 export const BUILTIN_LEVELS = {
-    askEverything: "lvl_ask_everything",
     readDocuments: "lvl_read_documents",
 } as const;
 
 export async function seedBuiltinLevels(): Promise<void> {
     const t = now();
-    await getDb().execute(
-        `INSERT OR IGNORE INTO permission_levels (id, name, description, is_builtin, created_at)
-     VALUES (?, ?, ?, 1, ?)`,
-        [
-            BUILTIN_LEVELS.askEverything,
-            "Ask everything",
-            "No automatic permissions — every tool call asks for approval.",
-            t,
-        ],
-    );
     await getDb().execute(
         `INSERT OR IGNORE INTO permission_levels (id, name, description, is_builtin, created_at)
      VALUES (?, ?, ?, 1, ?)`,

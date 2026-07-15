@@ -10,6 +10,7 @@ import { runPipeline } from "@/ai/pipelines/runner";
 import { appFetch } from "@/ai/providers/appFetch";
 import { useRuntime } from "@/app/runtime";
 import { ApprovalCards } from "@/components/chat/ApprovalCard";
+import { PermissionLevelSelect } from "@/components/PermissionLevelSelect";
 import { Button } from "@/components/ui/button";
 import { Input, Textarea } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
@@ -103,17 +104,11 @@ export function PipelinesTab() {
                 </label>
                 <label className="flex w-56 flex-col gap-1 text-sm">
                     Permission level for manual runs
-                    <Select
-                        value={levelId}
-                        onChange={(e) => setLevelId(e.target.value)}
-                    >
-                        <option value="">Ask everything</option>
-                        {levels.map((l) => (
-                            <option key={l.id} value={l.id}>
-                                {l.name}
-                            </option>
-                        ))}
-                    </Select>
+                    <PermissionLevelSelect
+                        levels={levels}
+                        value={levelId || null}
+                        onChange={(id) => setLevelId(id ?? "")}
+                    />
                 </label>
             </div>
 

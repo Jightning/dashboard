@@ -11,6 +11,7 @@ import {
 } from "@/lib/schemas";
 import { PROVIDERS, type ProviderId } from "@/ai/providers/registry";
 import { availableProviders } from "@/lib/env";
+import { PermissionLevelSelect } from "@/components/PermissionLevelSelect";
 import { Button } from "@/components/ui/button";
 import { Input, Textarea } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
@@ -273,22 +274,14 @@ function PresetForm({
                 <div className="flex gap-3">
                     <label className="flex flex-1 flex-col gap-1 text-sm">
                         Permission level
-                        <Select
-                            value={form.permissionLevelId ?? ""}
-                            onChange={(e) =>
-                                setForm({
-                                    ...form,
-                                    permissionLevelId: e.target.value || null,
-                                })
+                        <PermissionLevelSelect
+                            levels={levels}
+                            value={form.permissionLevelId ?? null}
+                            nullLabel="Ask everything (no level)"
+                            onChange={(id) =>
+                                setForm({ ...form, permissionLevelId: id })
                             }
-                        >
-                            <option value="">Ask everything (no level)</option>
-                            {levels.map((l) => (
-                                <option key={l.id} value={l.id}>
-                                    {l.name}
-                                </option>
-                            ))}
-                        </Select>
+                        />
                     </label>
                     <label className="flex flex-1 flex-col gap-1 text-sm">
                         Token budget

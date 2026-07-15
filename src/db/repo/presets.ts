@@ -36,7 +36,7 @@ export async function seedBuiltinPresets(defaults: {
             model: defaults.routerModel,
             routerModel: defaults.routerModel,
             enabledAgents: [],
-            permissionLevelId: BUILTIN_LEVELS.askEverything,
+            permissionLevelId: null,
             tokenBudget: 30_000,
             compactionThreshold: 12_000,
         },

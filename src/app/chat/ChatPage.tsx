@@ -41,7 +41,7 @@ import {
     buildSessionNetwork,
 } from "@/components/hud/networkData";
 import { Typewriter } from "@/components/hud/Typewriter";
-import { Select } from "@/components/ui/select";
+import { PermissionLevelSelect } from "@/components/PermissionLevelSelect";
 import { InstancesSidebar } from "./InstancesSidebar";
 
 interface ActiveChat {
@@ -265,18 +265,12 @@ function LevelDropdown({
         <label className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
             <Shield aria-hidden className="h-3.5 w-3.5 text-primary/70" />
             Permissions
-            <Select
+            <PermissionLevelSelect
                 className="h-8 font-mono text-xs normal-case tracking-normal"
-                value={levelId}
-                onChange={(e) => void change(e.target.value)}
-            >
-                <option value="">Ask everything</option>
-                {levels.map((l) => (
-                    <option key={l.id} value={l.id}>
-                        {l.name}
-                    </option>
-                ))}
-            </Select>
+                levels={levels}
+                value={levelId || null}
+                onChange={(id) => void change(id ?? "")}
+            />
         </label>
     );
 }
