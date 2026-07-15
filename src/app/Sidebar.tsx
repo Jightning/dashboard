@@ -1,7 +1,6 @@
 import {
     CalendarCheck,
     LayoutDashboard,
-    MessageSquare,
     Network,
     NotebookPen,
     Settings,
@@ -13,7 +12,6 @@ import { cn } from "@/lib/utils";
 
 export type Page =
     | "home"
-    | "chat"
     | "agents"
     | "notes"
     | "planner"
@@ -24,12 +22,13 @@ export type Page =
 export interface NavTarget {
     page: Page;
     tab?: string;
+    sessionId?: string;
 }
 
 interface NavItem {
     page: Page;
     label: string;
-    icon: typeof MessageSquare;
+    icon: typeof Network;
 }
 
 const SECTIONS: { heading: string; items: NavItem[] }[] = [
@@ -37,7 +36,6 @@ const SECTIONS: { heading: string; items: NavItem[] }[] = [
         heading: "Command",
         items: [
             { page: "home", label: "Home", icon: LayoutDashboard },
-            { page: "chat", label: "Chat", icon: MessageSquare },
             { page: "agents", label: "Agents", icon: Network },
         ],
     },

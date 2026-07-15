@@ -52,7 +52,11 @@ interface ActiveChat {
     initialMessages: UIMessage[];
 }
 
-export function ChatPage() {
+export function ChatWorkspace({
+    initialSessionId,
+}: {
+    initialSessionId?: string | null;
+} = {}) {
     const { settings } = useRuntime();
     const [sessions, setSessions] = useState<ChatSession[]>([]);
     const [presets, setPresets] = useState<Preset[]>([]);
@@ -110,6 +114,17 @@ export function ChatPage() {
         },
         [settings],
     );
+
+    // Deep link (e.g. "open this project chat" from the Projects page).
+    useEffect(() => {
+        if (!initialSessionId) return;
+        void sessionsRepo
+            .getSession(initialSessionId)
+            .then(openSession)
+            .catch((e: unknown) =>
+                setError(e instanceof Error ? e.message : String(e)),
+            );
+    }, [initialSessionId, openSession]);
 
     const newChat = useCallback(
         async (preset: Preset) => {
@@ -245,7 +260,7 @@ export function ChatPage() {
                         <p className="text-xs text-muted-foreground">
                             {sessions.length
                                 ? "Hover a node or row to link them · click to open."
-                                : "Start an agent from a preset in the sidebar."}
+                                : "Start a chat from a preset in the sidebar."}
                         </p>
                     </div>
                 )}

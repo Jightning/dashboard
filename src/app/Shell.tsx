@@ -2,7 +2,6 @@ import { useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { Sidebar, type Page, type NavTarget } from "./Sidebar";
 import { HomePage } from "./home/HomePage";
-import { ChatPage } from "./chat/ChatPage";
 import { AgentsPage } from "./agents/AgentsPage";
 import { NotesPage } from "./notes/NotesPage";
 import { PlannerPage } from "./planner/PlannerPage";
@@ -16,7 +15,6 @@ import { useRuntime } from "./runtime";
 
 const PAGES: Record<Page, () => React.JSX.Element> = {
     home: HomePage,
-    chat: ChatPage,
     agents: AgentsPage,
     notes: NotesPage,
     planner: PlannerPage,
@@ -51,7 +49,12 @@ export function Shell() {
                                 ease: [0.16, 1, 0.3, 1],
                             }}
                         >
-                            {nav.page === "notes" ? (
+                            {nav.page === "agents" ? (
+                                <AgentsPage
+                                    tab={nav.tab}
+                                    sessionId={nav.sessionId}
+                                />
+                            ) : nav.page === "notes" ? (
                                 <NotesPage tab={nav.tab} />
                             ) : nav.page === "planner" ? (
                                 <PlannerPage tab={nav.tab} />

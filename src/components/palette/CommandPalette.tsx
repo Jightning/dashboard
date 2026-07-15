@@ -20,8 +20,10 @@ import type { NoteSearchHit } from "@/db/repo/notes";
 
 const NAV: { target: NavTarget; label: string }[] = [
     { target: { page: "home" }, label: "Home" },
-    { target: { page: "chat" }, label: "Chat" },
-    { target: { page: "agents" }, label: "Agents" },
+    { target: { page: "agents", tab: "chat" }, label: "Chat" },
+    { target: { page: "agents", tab: "roster" }, label: "Agent roster" },
+    { target: { page: "agents", tab: "pipelines" }, label: "Pipelines" },
+    { target: { page: "agents", tab: "automations" }, label: "Automations" },
     { target: { page: "notes" }, label: "Notes" },
     { target: { page: "notes", tab: "bookmarks" }, label: "Bookmarks" },
     { target: { page: "notes", tab: "snippets" }, label: "Snippets" },

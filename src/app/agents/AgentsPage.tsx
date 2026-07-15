@@ -13,38 +13,66 @@ import { AgentTestBench } from "./AgentTestBench";
 import { PipelinesTab } from "./PipelinesTab";
 import { AutomationsTab } from "./AutomationsTab";
 import { TabBar } from "@/components/ui/tabs";
+import { ChatWorkspace } from "@/app/chat/ChatWorkspace";
 
-type Tab = "roster" | "pipelines" | "automations";
+type Tab = "chat" | "roster" | "pipelines" | "automations";
 const TABS: { id: Tab; label: string }[] = [
+    { id: "chat", label: "Chat" },
     { id: "roster", label: "Roster" },
     { id: "pipelines", label: "Pipelines" },
     { id: "automations", label: "Automations" },
 ];
+const isTab = (t: string | undefined): t is Tab => TABS.some((x) => x.id === t);
 
-export function AgentsPage() {
-    const [tab, setTab] = useState<Tab>("roster");
+export function AgentsPage({
+    tab,
+    sessionId,
+}: {
+    tab?: string;
+    sessionId?: string | null;
+} = {}) {
+    const [active, setActive] = useState<Tab>(isTab(tab) ? tab : "chat");
+    useEffect(() => {
+        if (isTab(tab)) setActive(tab);
+    }, [tab]);
 
     return (
-        <div className="h-full overflow-y-auto p-6">
-            <div className="mx-auto flex max-w-4xl flex-col gap-6">
-                <header>
-                    <h1 className="font-display text-2xl font-semibold tracking-wide">
-                        Agents
-                    </h1>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                        Define agents, chain them into pipelines, put pipelines
-                        on a schedule. Every tool call passes the permission
-                        engine — nothing runs silently.
-                    </p>
-                </header>
-                <TabBar tabs={TABS} active={tab} onSelect={setTab} />
-                {tab === "roster" && <RosterTab />}
-                {tab === "pipelines" && <PipelinesTab />}
-                {tab === "automations" && <AutomationsTab />}
+        <div className="flex h-full flex-col">
+            <div className="px-6 pt-4">
+                <TabBar tabs={TABS} active={active} onSelect={setActive} />
             </div>
+            {active === "chat" ? (
+                <div className="min-h-0 flex-1">
+                    <ChatWorkspace initialSessionId={sessionId} />
+                </div>
+            ) : (
+                <div className="min-h-0 flex-1 overflow-y-auto p-6">
+                    <div className="mx-auto flex max-w-4xl flex-col gap-6">
+                        <header>
+                            <h1 className="font-display text-2xl font-semibold tracking-wide">
+                                Agents
+                            </h1>
+                            <p className="mt-1 text-sm text-muted-foreground">
+                                {TAB_BLURBS[active]}
+                            </p>
+                        </header>
+                        {active === "roster" && <RosterTab />}
+                        {active === "pipelines" && <PipelinesTab />}
+                        {active === "automations" && <AutomationsTab />}
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
+
+const TAB_BLURBS: Record<Exclude<Tab, "chat">, string> = {
+    roster: "Your specialists. Each one is just instructions + a set of tools + a model — edit anything, or duplicate a builtin to start from a working example.",
+    pipelines:
+        "Chain agents into a sequence of steps. Each step sends a prompt to one agent; a step can reuse what earlier steps produced.",
+    automations:
+        "Put a pipeline on a schedule. Every tool call still passes the permission engine — nothing runs silently.",
+};
 
 function RosterTab() {
     const [agents, setAgents] = useState<AgentDef[]>([]);
