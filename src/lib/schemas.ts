@@ -91,6 +91,8 @@ export const chatSessionSchema = z.object({
     title: z.string(),
     preset_id: z.string().nullable(),
     permission_level_id: z.string().nullable(),
+    project_id: z.string().nullable(),
+    color: z.string().nullable(),
     compaction_summary: z.string().nullable(),
     created_at: z.number(),
     updated_at: z.number(),
@@ -133,6 +135,7 @@ export const documentSchema = z.object({
     content_text: z.string(),
     byte_size: z.number().nullable(),
     page_count: z.number().nullable(),
+    project_id: z.string().nullable(),
     created_at: z.number(),
 });
 export type Document = z.infer<typeof documentSchema>;
@@ -201,6 +204,7 @@ export const automationSchema = z.object({
     enabled: sqlBool,
     next_run_at: z.number().nullable(),
     last_run_at: z.number().nullable(),
+    project_id: z.string().nullable(),
     created_at: z.number(),
     updated_at: z.number(),
 });
@@ -300,6 +304,7 @@ export const bookmarkSchema = z.object({
     title: z.string(),
     url: z.string(),
     group_name: z.string(),
+    project_id: z.string().nullable(),
     created_at: z.number(),
 });
 export type Bookmark = z.infer<typeof bookmarkSchema>;
@@ -308,7 +313,18 @@ export const snippetSchema = z.object({
     id: z.string(),
     title: z.string(),
     body: z.string(),
+    group_name: z.string(),
     created_at: z.number(),
     updated_at: z.number(),
 });
 export type Snippet = z.infer<typeof snippetSchema>;
+
+export const projectSchema = z.object({
+    id: z.string(),
+    name: z.string(),
+    description: z.string().nullable(),
+    color: z.string().nullable(),
+    created_at: z.number(),
+    updated_at: z.number(),
+});
+export type Project = z.infer<typeof projectSchema>;

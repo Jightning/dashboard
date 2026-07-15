@@ -17,6 +17,7 @@ function auto(overrides: Partial<Automation>): Automation {
         enabled: 1,
         next_run_at: null,
         last_run_at: null,
+        project_id: null,
         created_at: 0,
         updated_at: 0,
         ...overrides,

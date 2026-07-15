@@ -11,12 +11,13 @@ export async function createBookmark(input: {
     title: string;
     url: string;
     groupName?: string;
+    projectId?: string | null;
 }): Promise<Bookmark> {
     const id = newId("bmk");
     await getDb().execute(
-        `INSERT INTO bookmarks (id, title, url, group_name, created_at)
-         VALUES (?, ?, ?, ?, ?)`,
-        [id, input.title, input.url, input.groupName ?? "General", now()],
+        `INSERT INTO bookmarks (id, title, url, group_name, project_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [id, input.title, input.url, input.groupName ?? "General", input.projectId ?? null, now()],
     );
     const rows = await getDb().select("SELECT * FROM bookmarks WHERE id = ?", [id]);
     return bookmarkSchema.parse(rows[0]);

@@ -43,7 +43,7 @@ export async function listDocuments(
     folder?: string,
 ): Promise<Omit<Document, "content_text">[]> {
     const sql =
-        "SELECT id, title, source_name, mime_type, folder, '' AS content_text, byte_size, page_count, created_at FROM documents";
+        "SELECT id, title, source_name, mime_type, folder, '' AS content_text, byte_size, page_count, project_id, created_at FROM documents";
     const normalized = folder ? normalizeFolder(folder) : null;
     const scoped =
         normalized !== null && normalized !== "/" ? normalized : null;

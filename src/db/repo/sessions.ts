@@ -6,17 +6,19 @@ export async function createSession(opts: {
     title?: string;
     presetId?: string | null;
     permissionLevelId?: string | null;
+    projectId?: string | null;
 }): Promise<ChatSession> {
     const id = newId("ses");
     const t = now();
     await getDb().execute(
-        `INSERT INTO chat_sessions (id, title, preset_id, permission_level_id, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO chat_sessions (id, title, preset_id, permission_level_id, project_id, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
         [
             id,
             opts.title ?? "New chat",
             opts.presetId ?? null,
             opts.permissionLevelId ?? null,
+            opts.projectId ?? null,
             t,
             t,
         ],

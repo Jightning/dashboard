@@ -62,6 +62,12 @@ pub fn migrations() -> Vec<Migration> {
             sql: include_str!("../migrations/0010_permission_cleanup.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 11,
+            description: "projects + project_id/color/group columns",
+            sql: include_str!("../migrations/0011_projects.sql"),
+            kind: MigrationKind::Up,
+        },
     ]
 }
 
