@@ -47,7 +47,7 @@ export function PermissionsPage() {
         <div className="h-full overflow-y-auto p-6">
             <div className="mx-auto flex max-w-2xl flex-col gap-4">
                 <header>
-                    <h1 className="font-display text-2xl font-bold tracking-wide">
+                    <h1 className="font-display text-2xl font-semibold tracking-wide">
                         Permissions
                     </h1>
                     <p className="mt-1 text-sm text-muted-foreground">

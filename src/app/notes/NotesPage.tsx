@@ -142,7 +142,7 @@ function NoteList({
     return (
         <div className="flex w-64 shrink-0 flex-col border-r border-border">
             <div className="flex items-center justify-between px-3 py-3">
-                <h1 className="font-display text-lg font-bold tracking-wide">
+                <h1 className="font-display text-lg font-semibold tracking-wide">
                     Notes
                 </h1>
                 <Button
