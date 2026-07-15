@@ -31,6 +31,14 @@ export function TasksPage() {
         void reload();
     }, [reload]);
 
+    // If the course backing the active filter chip gets deleted, fall back
+    // to "All" instead of silently showing an empty task list.
+    useEffect(() => {
+        if (courseFilter && !courses.some((c) => c.id === courseFilter)) {
+            setCourseFilter(null);
+        }
+    }, [courses, courseFilter]);
+
     const act = async (fn: () => Promise<unknown>) => {
         setError(null);
         try {
