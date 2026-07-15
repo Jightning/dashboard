@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { FilterChips } from "@/components/ui/filterChips";
 import type { CalendarEvent, Course, Task } from "@/lib/schemas";
 
 const DAY = 86_400_000;
@@ -19,6 +20,7 @@ export function TasksPage() {
     const [courses, setCourses] = useState<Course[]>([]);
     const [events, setEvents] = useState<CalendarEvent[]>([]);
     const [error, setError] = useState<string | null>(null);
+    const [courseFilter, setCourseFilter] = useState<string | null>(null);
 
     const reload = useCallback(async () => {
         setTasks(await tasksRepo.listOpenTasks());
@@ -47,13 +49,26 @@ export function TasksPage() {
                         Tasks
                     </h1>
                     <p className="mt-1 text-sm text-muted-foreground">
-                        Assignments, follow-ups, and the class schedule — also
-                        readable by the planner agent.
+                        Everything with a deadline — also readable by the
+                        planner agent.
                     </p>
                 </header>
                 {error && <p className="text-xs text-destructive">{error}</p>}
                 <QuickAdd courses={courses} onAdd={(input) => act(() => tasksRepo.createTask(input))} />
-                <TaskList tasks={tasks} courses={courses} act={act} />
+                <FilterChips
+                    options={courses.map((c) => ({
+                        id: c.id,
+                        label: c.code,
+                        color: c.color ?? undefined,
+                    }))}
+                    active={courseFilter}
+                    onChange={setCourseFilter}
+                />
+                <TaskList
+                    tasks={courseFilter ? tasks.filter((t) => t.course_id === courseFilter) : tasks}
+                    courses={courses}
+                    act={act}
+                />
                 <WeekEvents events={events} courses={courses} />
                 <CoursesPanel courses={courses} act={act} reload={reload} />
             </div>
@@ -98,7 +113,7 @@ function QuickAdd({
                 New task
                 <Input
                     value={title}
-                    placeholder="e.g. ECE 437 lab 3 report"
+                    placeholder="e.g. Ship the quarterly report"
                     onChange={(e) => setTitle(e.target.value)}
                     onKeyDown={(e) => {
                         if (e.key === "Enter" && !e.repeat && !submitting)
@@ -114,20 +129,22 @@ function QuickAdd({
                     onChange={(e) => setDue(e.target.value)}
                 />
             </label>
-            <label className="flex w-32 flex-col gap-1 text-sm">
-                Course
-                <Select
-                    value={courseId}
-                    onChange={(e) => setCourseId(e.target.value)}
-                >
-                    <option value="">—</option>
-                    {courses.map((c) => (
-                        <option key={c.id} value={c.id}>
-                            {c.code}
-                        </option>
-                    ))}
-                </Select>
-            </label>
+            {courses.length > 0 && (
+                <label className="flex w-32 flex-col gap-1 text-sm">
+                    Course
+                    <Select
+                        value={courseId}
+                        onChange={(e) => setCourseId(e.target.value)}
+                    >
+                        <option value="">—</option>
+                        {courses.map((c) => (
+                            <option key={c.id} value={c.id}>
+                                {c.code}
+                            </option>
+                        ))}
+                    </Select>
+                </label>
+            )}
             <label className="flex w-28 flex-col gap-1 text-sm">
                 Repeat
                 <Select
