@@ -79,11 +79,13 @@ function safeToolNames(def: AgentDef): string[] {
     }
 }
 
-/** A session's identity color: its lone specialist, else the orchestrator hue. */
+/** A session's identity color: user-chosen, else its lone specialist, else orchestrator. */
 export function sessionColor(
+    session: ChatSession,
     preset: Preset | undefined,
     agentsById: Map<string, AgentDef>,
 ): string {
+    if (session.color) return session.color;
     if (!preset) return "var(--primary)";
     const ids = safeAgents(preset);
     const def = ids.length === 1 ? agentsById.get(ids[0]!) : undefined;
@@ -196,7 +198,7 @@ export function buildSessionNetwork(
             id: hubId,
             kind: "session",
             label: session.title,
-            color: sessionColor(preset, agentsById),
+            color: sessionColor(session, preset, agentsById),
             unit: hubUnit,
             r: HUB_R,
             primary: true,

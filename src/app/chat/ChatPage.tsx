@@ -169,6 +169,28 @@ export function ChatPage() {
         }
     }, []);
 
+    const renameInstance = useCallback(
+        async (session: ChatSession, title: string) => {
+            if (title === session.title) return;
+            await sessionsRepo.renameSession(session.id, title);
+            setSessions(await sessionsRepo.listSessions());
+            setActive((cur) =>
+                cur?.session.id === session.id
+                    ? { ...cur, session: { ...cur.session, title } }
+                    : cur,
+            );
+        },
+        [],
+    );
+
+    const recolorInstance = useCallback(
+        async (session: ChatSession, color: string | null) => {
+            await sessionsRepo.setSessionColor(session.id, color);
+            setSessions(await sessionsRepo.listSessions());
+        },
+        [],
+    );
+
     return (
         <div className="flex h-full">
             <InstancesSidebar
@@ -182,6 +204,8 @@ export function ChatPage() {
                 onDelete={(s) => void deleteInstance(s)}
                 onHover={setHoveredInstanceId}
                 onNewChat={(p) => void newChat(p)}
+                onRename={(s, t) => void renameInstance(s, t)}
+                onRecolor={(s, c) => void recolorInstance(s, c)}
             />
 
             <div className="flex min-w-0 flex-1 flex-col">

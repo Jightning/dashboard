@@ -5,6 +5,7 @@ import {
     ChevronRight,
     PanelLeftClose,
     PanelLeftOpen,
+    Pencil,
     Plus,
     Trash2,
     X,
@@ -20,6 +21,12 @@ import { sessionMessageCount } from "@/db/repo/messages";
 import { agentColor } from "@/components/hud/AgentNode";
 import { relativeTime, sessionColor } from "@/components/hud/networkData";
 import { cn } from "@/lib/utils";
+
+/** Swatches for user recoloring — the agent identity hues plus neutrals. */
+export const SESSION_COLORS = [
+    "#22d3ee", "#a78bfa", "#f472b6", "#fb923c",
+    "#facc15", "#4ade80", "#60a5fa", "#f87171",
+] as const;
 
 /**
  * Left panel listing every agent instance (chat session): open, expand for
@@ -37,6 +44,8 @@ export function InstancesSidebar({
     onDelete,
     onHover,
     onNewChat,
+    onRename,
+    onRecolor,
 }: {
     sessions: ChatSession[];
     presets: Preset[];
@@ -48,11 +57,15 @@ export function InstancesSidebar({
     onDelete: (session: ChatSession) => void;
     onHover: (sessionId: string | null) => void;
     onNewChat: (preset: Preset) => void;
+    onRename: (session: ChatSession, title: string) => void;
+    onRecolor: (session: ChatSession, color: string | null) => void;
 }) {
     const [collapsed, setCollapsed] = useState(false);
     const [expandedId, setExpandedId] = useState<string | null>(null);
     const [confirmingId, setConfirmingId] = useState<string | null>(null);
     const [counts, setCounts] = useState<Record<string, number>>({});
+    const [renamingId, setRenamingId] = useState<string | null>(null);
+    const [draftTitle, setDraftTitle] = useState("");
     const rowRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
     const presetById = new Map(presets.map((p) => [p.id, p]));
@@ -103,6 +116,7 @@ export function InstancesSidebar({
                             )}
                             style={{
                                 background: sessionColor(
+                                    s,
                                     s.preset_id
                                         ? presetById.get(s.preset_id)
                                         : undefined,
@@ -154,7 +168,7 @@ export function InstancesSidebar({
                     const preset = s.preset_id
                         ? presetById.get(s.preset_id)
                         : undefined;
-                    const color = sessionColor(preset, agentsById);
+                    const color = sessionColor(s, preset, agentsById);
                     const active = activeId === s.id;
                     const highlit = highlightId === s.id;
                     const expanded = expandedId === s.id;
@@ -186,19 +200,39 @@ export function InstancesSidebar({
                                     style={{ background: color }}
                                     aria-hidden
                                 />
-                                <button
-                                    onClick={() => onOpen(s)}
-                                    className="min-w-0 flex-1 text-left"
-                                >
-                                    <div className="truncate text-xs text-foreground">
-                                        {s.title}
-                                    </div>
-                                    <div className="truncate font-mono text-[10px] text-muted-foreground">
-                                        {preset
-                                            ? preset.name
-                                            : "no preset"}
-                                    </div>
-                                </button>
+                                {renamingId === s.id ? (
+                                    <input
+                                        autoFocus
+                                        value={draftTitle}
+                                        onChange={(e) => setDraftTitle(e.target.value)}
+                                        onKeyDown={(e) => {
+                                            if (e.key === "Enter") {
+                                                onRename(s, draftTitle.trim() || s.title);
+                                                setRenamingId(null);
+                                            }
+                                            if (e.key === "Escape") setRenamingId(null);
+                                        }}
+                                        onBlur={() => {
+                                            onRename(s, draftTitle.trim() || s.title);
+                                            setRenamingId(null);
+                                        }}
+                                        className="min-w-0 flex-1 rounded-sm border border-primary/40 bg-transparent px-1 py-0.5 text-xs focus-visible:outline-none"
+                                    />
+                                ) : (
+                                    <button
+                                        onClick={() => onOpen(s)}
+                                        className="min-w-0 flex-1 text-left"
+                                    >
+                                        <div className="truncate text-xs text-foreground">
+                                            {s.title}
+                                        </div>
+                                        <div className="truncate font-mono text-[10px] text-muted-foreground">
+                                            {preset
+                                                ? preset.name
+                                                : "no preset"}
+                                        </div>
+                                    </button>
+                                )}
 
                                 {confirmingId === s.id ? (
                                     <div className="flex items-center gap-0.5">
@@ -221,6 +255,15 @@ export function InstancesSidebar({
                                     </div>
                                 ) : (
                                     <div className="flex items-center gap-0.5">
+                                        <IconButton
+                                            label="Rename chat"
+                                            onClick={() => {
+                                                setRenamingId(s.id);
+                                                setDraftTitle(s.title);
+                                            }}
+                                        >
+                                            <Pencil className="h-3.5 w-3.5" />
+                                        </IconButton>
                                         <IconButton
                                             label="Delete agent"
                                             onClick={() => setConfirmingId(s.id)}
@@ -289,6 +332,30 @@ export function InstancesSidebar({
                                     </Detail>
                                     <Detail label="Updated">
                                         {relativeTime(s.updated_at)}
+                                    </Detail>
+                                    <Detail label="Color">
+                                        <div className="flex flex-wrap justify-end gap-1">
+                                            {SESSION_COLORS.map((c) => (
+                                                <button
+                                                    key={c}
+                                                    aria-label={`Set color ${c}`}
+                                                    onClick={() => onRecolor(s, c)}
+                                                    className={cn(
+                                                        "h-3.5 w-3.5 cursor-pointer rounded-full border border-transparent hover:scale-110",
+                                                        s.color === c &&
+                                                            "ring-1 ring-foreground/60",
+                                                    )}
+                                                    style={{ background: c }}
+                                                />
+                                            ))}
+                                            <button
+                                                aria-label="Automatic color"
+                                                onClick={() => onRecolor(s, null)}
+                                                className="rounded-sm px-1 font-mono text-[9px] uppercase text-muted-foreground hover:text-foreground"
+                                            >
+                                                auto
+                                            </button>
+                                        </div>
                                     </Detail>
                                 </div>
                             )}
