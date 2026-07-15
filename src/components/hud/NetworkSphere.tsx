@@ -137,10 +137,8 @@ export function NetworkSphere({
                         "transform",
                         `translate(${p.cx} ${p.cy}) scale(${len})`,
                     );
-                    // Slightly dimmer than the star body; vanishes with depth like everything else.
-                    spike.setAttribute("stroke-opacity", String(op * 0.55));
-                    // Keep hairline weight constant regardless of scale.
-                    spike.setAttribute("stroke-width", String(0.4 / len));
+                    // Softer than the star body; vanishes with depth like everything else.
+                    spike.setAttribute("fill-opacity", String(op * 0.45));
                 }
                 const hit = hitEls.current[i];
                 if (hit) {
@@ -346,7 +344,8 @@ export function NetworkSphere({
                     />
                 ))}
 
-                {/* Diffraction spikes — primary stars only, positioned by the rAF loop */}
+                {/* Diffraction spikes — primary stars only, positioned by the rAF loop.
+                    Two thin diamonds = a tapered four-point star; fill-based, no strokes. */}
                 {nodes.map((n, i) =>
                     n.primary ? (
                         <g
@@ -355,12 +354,11 @@ export function NetworkSphere({
                                 spikeEls.current[i] = el;
                             }}
                             transform={`translate(${seed[i]!.cx} ${seed[i]!.cy}) scale(${n.r * 3.2})`}
-                            stroke={n.color}
-                            strokeWidth={0.4 / (n.r * 3.2)}
-                            strokeOpacity={0.35 + 0.65 * seed[i]!.depth}
+                            fill={n.color}
+                            fillOpacity={(0.35 + 0.65 * seed[i]!.depth) * 0.45}
                         >
-                            <line x1={-1} y1={0} x2={1} y2={0} />
-                            <line x1={0} y1={-1} x2={0} y2={1} />
+                            <path d="M -1 0 L 0 0.07 L 1 0 L 0 -0.07 Z" />
+                            <path d="M 0 -1 L 0.07 0 L 0 1 L -0.07 0 Z" />
                         </g>
                     ) : null,
                 )}

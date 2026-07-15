@@ -1,10 +1,11 @@
 import { useEffect, useRef } from "react";
 
 /**
- * The photographic plate: a static star field (drawn once to canvas), two
- * faint great-circle graticule arcs, and a violet nebula breath at the top.
- * Deliberately static — the sky does not blink. Same perf contract as before:
- * zero per-frame work, no filters, no blur.
+ * The photographic plate: a static star field (drawn once to canvas; bright
+ * stars get soft halos + tapered spikes), two faint great-circle graticule
+ * arcs, and a violet nebula breath at the top. Deliberately static — the
+ * sky does not blink. Same perf contract as before: zero per-frame work,
+ * no filters, no blur.
  */
 export function GridBackground() {
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -42,17 +43,29 @@ export function GridBackground() {
             ctx.beginPath();
             ctx.arc(x, y, r, 0, Math.PI * 2);
             ctx.fill();
-            // The brightest few get a fine diffraction cross — the signature,
-            // whispered here, spoken at full volume on the network globe.
+            // The brightest few get a soft halo + four tapered diffraction
+            // spikes — thin triangles that fade by shape instead of hard
+            // stroked lines.
             if (mag > 0.97) {
-                ctx.strokeStyle = `oklch(0.9 0.03 85 / 0.25)`;
-                ctx.lineWidth = 0.5;
+                const halo = ctx.createRadialGradient(x, y, 0, x, y, r * 5);
+                halo.addColorStop(0, "oklch(0.9 0.03 85 / 0.3)");
+                halo.addColorStop(1, "oklch(0.9 0.03 85 / 0)");
+                ctx.fillStyle = halo;
                 ctx.beginPath();
-                ctx.moveTo(x - r * 5, y);
-                ctx.lineTo(x + r * 5, y);
-                ctx.moveTo(x, y - r * 5);
-                ctx.lineTo(x, y + r * 5);
-                ctx.stroke();
+                ctx.arc(x, y, r * 5, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.fillStyle = "oklch(0.9 0.03 85 / 0.14)";
+                const len = r * 7;
+                const half = r * 0.35;
+                for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+                    ctx.beginPath();
+                    ctx.moveTo(x - dy * half, y + dx * half);
+                    ctx.lineTo(x + dy * half, y - dx * half);
+                    ctx.lineTo(x + dx * len, y + dy * len);
+                    ctx.closePath();
+                    ctx.fill();
+                }
             }
         }
     }, []);
