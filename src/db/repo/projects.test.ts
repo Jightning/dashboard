@@ -9,7 +9,13 @@ import {
     projectCounts,
     updateProject,
 } from "./projects";
-import { createSession, getSession, listSessions } from "./sessions";
+import {
+    createSession,
+    getSession,
+    listSessions,
+    setSessionColor,
+    setSessionProject,
+} from "./sessions";
 import { createBookmark, listBookmarks } from "./library";
 
 let db: ReturnType<typeof createTestDbClient>;
@@ -62,5 +68,21 @@ describe("projects repo", () => {
         expect((await getSession(s.id)).project_id).toBeNull();
         expect((await listBookmarks())[0]!.project_id).toBeNull();
         expect(await listSessions()).toHaveLength(1);
+    });
+
+    it("filters sessions by project and recolors them", async () => {
+        const p = await createProject({ name: "P" });
+        const inProj = await createSession({ title: "a", projectId: p.id });
+        await createSession({ title: "b" });
+
+        expect((await listSessions({ projectId: p.id })).map((s) => s.id)).toEqual([
+            inProj.id,
+        ]);
+        expect(await listSessions()).toHaveLength(2);
+
+        await setSessionColor(inProj.id, "#f472b6");
+        expect((await getSession(inProj.id)).color).toBe("#f472b6");
+        await setSessionProject(inProj.id, null);
+        expect(await listSessions({ projectId: p.id })).toEqual([]);
     });
 });

@@ -10,12 +10,13 @@ export async function insertDocument(opts: {
     sourceName?: string | null;
     byteSize?: number | null;
     pageCount?: number | null;
+    projectId?: string | null;
 }): Promise<Document> {
     const id = newId("doc");
     await getDb().execute(
         `INSERT INTO documents
-       (id, title, source_name, mime_type, folder, content_text, byte_size, page_count, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, title, source_name, mime_type, folder, content_text, byte_size, page_count, project_id, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
             id,
             opts.title,
@@ -25,6 +26,7 @@ export async function insertDocument(opts: {
             opts.contentText,
             opts.byteSize ?? null,
             opts.pageCount ?? null,
+            opts.projectId ?? null,
             now(),
         ],
     );
@@ -53,6 +55,17 @@ export async function listDocuments(
               [scoped, `${scoped}/%`],
           )
         : await getDb().select(`${sql} ORDER BY created_at DESC`);
+    return rows.map((r) => documentSchema.parse(r));
+}
+
+/** Metadata-only listing for a project's Files panel. */
+export async function listProjectDocuments(projectId: string): Promise<Document[]> {
+    const rows = await getDb().select(
+        `SELECT id, title, source_name, mime_type, folder, '' AS content_text,
+                byte_size, page_count, project_id, created_at
+         FROM documents WHERE project_id = ? ORDER BY created_at DESC`,
+        [projectId],
+    );
     return rows.map((r) => documentSchema.parse(r));
 }
 

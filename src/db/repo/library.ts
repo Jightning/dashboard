@@ -23,11 +23,42 @@ export async function createBookmark(input: {
     return bookmarkSchema.parse(rows[0]);
 }
 
-export async function listBookmarks(): Promise<Bookmark[]> {
-    const rows = await getDb().select(
-        "SELECT * FROM bookmarks ORDER BY group_name ASC, title ASC",
-    );
+export async function listBookmarks(filter?: {
+    /** null → unfiled only; string → that project's; omitted → all. */
+    projectId?: string | null;
+}): Promise<Bookmark[]> {
+    let rows;
+    if (filter?.projectId === undefined) {
+        rows = await getDb().select(
+            "SELECT * FROM bookmarks ORDER BY group_name ASC, title ASC",
+        );
+    } else if (filter.projectId === null) {
+        rows = await getDb().select(
+            "SELECT * FROM bookmarks WHERE project_id IS NULL ORDER BY group_name ASC, title ASC",
+        );
+    } else {
+        rows = await getDb().select(
+            "SELECT * FROM bookmarks WHERE project_id = ? ORDER BY group_name ASC, title ASC",
+            [filter.projectId],
+        );
+    }
     return rows.map((r) => bookmarkSchema.parse(r));
+}
+
+export async function updateBookmark(
+    id: string,
+    input: {
+        title: string;
+        url: string;
+        groupName: string;
+        projectId: string | null;
+    },
+): Promise<void> {
+    const res = await getDb().execute(
+        "UPDATE bookmarks SET title = ?, url = ?, group_name = ?, project_id = ? WHERE id = ?",
+        [input.title, input.url, input.groupName || "General", input.projectId, id],
+    );
+    if (res.rowsAffected === 0) throw new Error(`bookmark not found: ${id}`);
 }
 
 export async function deleteBookmark(id: string): Promise<void> {
@@ -37,13 +68,14 @@ export async function deleteBookmark(id: string): Promise<void> {
 export async function createSnippet(input: {
     title: string;
     body: string;
+    groupName?: string;
 }): Promise<Snippet> {
     const id = newId("snp");
     const t = now();
     await getDb().execute(
-        `INSERT INTO snippets (id, title, body, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?)`,
-        [id, input.title, input.body, t, t],
+        `INSERT INTO snippets (id, title, body, group_name, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [id, input.title, input.body, input.groupName ?? "General", t, t],
     );
     const rows = await getDb().select("SELECT * FROM snippets WHERE id = ?", [id]);
     return snippetSchema.parse(rows[0]);
@@ -51,18 +83,18 @@ export async function createSnippet(input: {
 
 export async function updateSnippet(
     id: string,
-    input: { title: string; body: string },
+    input: { title: string; body: string; groupName: string },
 ): Promise<void> {
     const res = await getDb().execute(
-        "UPDATE snippets SET title = ?, body = ?, updated_at = ? WHERE id = ?",
-        [input.title, input.body, now(), id],
+        "UPDATE snippets SET title = ?, body = ?, group_name = ?, updated_at = ? WHERE id = ?",
+        [input.title, input.body, input.groupName, now(), id],
     );
     if (res.rowsAffected === 0) throw new Error(`snippet not found: ${id}`);
 }
 
 export async function listSnippets(): Promise<Snippet[]> {
     const rows = await getDb().select(
-        "SELECT * FROM snippets ORDER BY title ASC",
+        "SELECT * FROM snippets ORDER BY group_name ASC, title ASC",
     );
     return rows.map((r) => snippetSchema.parse(r));
 }

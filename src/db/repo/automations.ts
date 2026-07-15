@@ -13,6 +13,7 @@ export interface AutomationInput {
     inputTemplate: string;
     permissionLevelId?: string | null;
     outputNoteFolder?: string | null;
+    projectId?: string | null;
 }
 
 export async function createAutomation(
@@ -24,8 +25,8 @@ export async function createAutomation(
         `INSERT INTO automations
            (id, name, pipeline_id, schedule_kind, interval_minutes, time_of_day,
             day_of_week, input_template, permission_level_id, output_note_folder,
-            enabled, next_run_at, last_run_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, NULL, ?, ?)`,
+            project_id, enabled, next_run_at, last_run_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, NULL, ?, ?)`,
         [
             id,
             input.name,
@@ -37,6 +38,7 @@ export async function createAutomation(
             input.inputTemplate,
             input.permissionLevelId ?? null,
             input.outputNoteFolder ?? null,
+            input.projectId ?? null,
             t,
             t,
         ],
@@ -58,7 +60,7 @@ export async function updateAutomation(
         `UPDATE automations SET
            name = ?, pipeline_id = ?, schedule_kind = ?, interval_minutes = ?,
            time_of_day = ?, day_of_week = ?, input_template = ?,
-           permission_level_id = ?, output_note_folder = ?, updated_at = ?
+           permission_level_id = ?, output_note_folder = ?, project_id = ?, updated_at = ?
          WHERE id = ?`,
         [
             input.name,
@@ -70,6 +72,7 @@ export async function updateAutomation(
             input.inputTemplate,
             input.permissionLevelId ?? null,
             input.outputNoteFolder ?? null,
+            input.projectId ?? null,
             now(),
             id,
         ],
@@ -108,10 +111,17 @@ export async function getAutomation(id: string): Promise<Automation> {
     return automationSchema.parse(rows[0]);
 }
 
-export async function listAutomations(): Promise<Automation[]> {
-    const rows = await getDb().select(
-        "SELECT * FROM automations ORDER BY created_at ASC",
-    );
+export async function listAutomations(filter?: {
+    projectId?: string;
+}): Promise<Automation[]> {
+    const rows = filter?.projectId
+        ? await getDb().select(
+              "SELECT * FROM automations WHERE project_id = ? ORDER BY created_at ASC",
+              [filter.projectId],
+          )
+        : await getDb().select(
+              "SELECT * FROM automations ORDER BY created_at ASC",
+          );
     return rows.map((r) => automationSchema.parse(r));
 }
 

@@ -35,10 +35,17 @@ export async function getSession(id: string): Promise<ChatSession> {
     return chatSessionSchema.parse(rows[0]);
 }
 
-export async function listSessions(): Promise<ChatSession[]> {
-    const rows = await getDb().select(
-        "SELECT * FROM chat_sessions ORDER BY updated_at DESC",
-    );
+export async function listSessions(filter?: {
+    projectId?: string;
+}): Promise<ChatSession[]> {
+    const rows = filter?.projectId
+        ? await getDb().select(
+              "SELECT * FROM chat_sessions WHERE project_id = ? ORDER BY updated_at DESC",
+              [filter.projectId],
+          )
+        : await getDb().select(
+              "SELECT * FROM chat_sessions ORDER BY updated_at DESC",
+          );
     return rows.map((r) => chatSessionSchema.parse(r));
 }
 
@@ -78,4 +85,24 @@ export async function setCompactionSummary(
 
 export async function deleteSession(id: string): Promise<void> {
     await getDb().execute("DELETE FROM chat_sessions WHERE id = ?", [id]);
+}
+
+export async function setSessionColor(
+    id: string,
+    color: string | null,
+): Promise<void> {
+    await getDb().execute(
+        "UPDATE chat_sessions SET color = ?, updated_at = ? WHERE id = ?",
+        [color, now(), id],
+    );
+}
+
+export async function setSessionProject(
+    id: string,
+    projectId: string | null,
+): Promise<void> {
+    await getDb().execute(
+        "UPDATE chat_sessions SET project_id = ?, updated_at = ? WHERE id = ?",
+        [projectId, now(), id],
+    );
 }
