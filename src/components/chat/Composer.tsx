@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
     Image as ImageIcon,
     Mic,
@@ -40,6 +40,17 @@ export function Composer({
     const [transcribing, setTranscribing] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const recorderRef = useRef(new MicRecorder());
+    const taRef = useRef<HTMLTextAreaElement>(null);
+
+    // One line (36px = h-9, matching the icon buttons) when empty; grows with
+    // content up to max-h-40, then scrolls. Runs on every text change,
+    // including the post-send reset to "".
+    useEffect(() => {
+        const ta = taRef.current;
+        if (!ta) return;
+        ta.style.height = "auto";
+        ta.style.height = `${Math.min(ta.scrollHeight, 160)}px`;
+    }, [text]);
 
     const submit = () => {
         const trimmed = text.trim();
@@ -183,8 +194,9 @@ export function Composer({
                         </Button>
                     )}
                     <textarea
-                        rows={2}
-                        className="flex-1 resize-none bg-transparent px-2 py-1.5 text-sm placeholder:text-muted-foreground focus-visible:outline-none disabled:opacity-50"
+                        ref={taRef}
+                        rows={1}
+                        className="max-h-40 flex-1 resize-none bg-transparent px-2 py-2 text-sm leading-5 placeholder:text-muted-foreground focus-visible:outline-none disabled:opacity-50"
                         placeholder={
                             disabled
                                 ? "Start a chat first"
