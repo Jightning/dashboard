@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { Sidebar, type Page } from "./Sidebar";
+import { Sidebar, type Page, type NavTarget } from "./Sidebar";
 import { HomePage } from "./home/HomePage";
 import { ChatPage } from "./chat/ChatPage";
 import { AgentsPage } from "./agents/AgentsPage";
@@ -8,7 +8,6 @@ import { NotesPage } from "./notes/NotesPage";
 import { TasksPage } from "./tasks/TasksPage";
 import { ApplicationsPage } from "./applications/ApplicationsPage";
 import { ReviewPage } from "./review/ReviewPage";
-import { LibraryPage } from "./library/LibraryPage";
 import { SettingsPage } from "./settings/SettingsPage";
 import { PresetsPage } from "./presets/PresetsPage";
 import { PermissionsPage } from "./permissions/PermissionsPage";
@@ -25,26 +24,28 @@ const PAGES: Record<Page, () => React.JSX.Element> = {
     tasks: TasksPage,
     applications: ApplicationsPage,
     review: ReviewPage,
-    library: LibraryPage,
     presets: PresetsPage,
     permissions: PermissionsPage,
     settings: SettingsPage,
 };
 
 export function Shell() {
-    const [page, setPage] = useState<Page>("home");
+    const [nav, setNav] = useState<NavTarget>({ page: "home" });
     const { settings } = useRuntime();
-    const Active = PAGES[page];
+    const Active = PAGES[nav.page];
 
     return (
         <div className="flex h-screen flex-col">
             <GridBackground />
             <div className="flex min-h-0 flex-1">
-                <Sidebar page={page} onNavigate={setPage} />
+                <Sidebar
+                    page={nav.page}
+                    onNavigate={(p) => setNav({ page: p })}
+                />
                 <main className="min-w-0 flex-1 overflow-hidden">
                     <AnimatePresence mode="wait">
                         <motion.div
-                            key={page}
+                            key={nav.page}
                             className="h-full"
                             initial={{ opacity: 0, y: 8 }}
                             animate={{ opacity: 1, y: 0 }}
@@ -54,7 +55,11 @@ export function Shell() {
                                 ease: [0.16, 1, 0.3, 1],
                             }}
                         >
-                            <Active />
+                            {nav.page === "notes" ? (
+                                <NotesPage tab={nav.tab} />
+                            ) : (
+                                <Active />
+                            )}
                         </motion.div>
                     </AnimatePresence>
                 </main>
@@ -65,7 +70,7 @@ export function Shell() {
                     {settings.defaultProvider}/{settings.defaultModel}
                 </span>
             </StatusBar>
-            <CommandPalette onNavigate={setPage} />
+            <CommandPalette onNavigate={setNav} />
         </div>
     );
 }

@@ -5,13 +5,60 @@ import * as notesRepo from "@/db/repo/notes";
 import type { Note, NoteSummary } from "@/lib/schemas";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { TabBar } from "@/components/ui/tabs";
+import { BookmarksTab } from "./BookmarksTab";
+import { SnippetsTab } from "./SnippetsTab";
 import { cn } from "@/lib/utils";
 
 marked.setOptions({ breaks: true, gfm: true });
 
 type SaveState = "idle" | "saving" | "saved";
 
-export function NotesPage() {
+type NotesTab = "notes" | "bookmarks" | "snippets";
+const TABS: { id: NotesTab; label: string }[] = [
+    { id: "notes", label: "Notes" },
+    { id: "bookmarks", label: "Bookmarks" },
+    { id: "snippets", label: "Snippets" },
+];
+const isTab = (t: string | undefined): t is NotesTab =>
+    t === "notes" || t === "bookmarks" || t === "snippets";
+
+export function NotesPage({ tab }: { tab?: string } = {}) {
+    const [active, setActive] = useState<NotesTab>(isTab(tab) ? tab : "notes");
+    useEffect(() => {
+        if (isTab(tab)) setActive(tab);
+    }, [tab]);
+
+    return (
+        <div className="flex h-full flex-col">
+            <div className="px-6 pt-4">
+                <TabBar tabs={TABS} active={active} onSelect={setActive} />
+            </div>
+            {active === "notes" ? (
+                <div className="min-h-0 flex-1">
+                    <NotesTabBody />
+                </div>
+            ) : (
+                <div className="min-h-0 flex-1 overflow-y-auto p-6">
+                    <div className="mx-auto flex max-w-3xl flex-col gap-6">
+                        <p className="text-sm text-muted-foreground">
+                            {active === "bookmarks"
+                                ? "Bookmarks — all reachable from ⌘K."
+                                : "Snippets — all reachable from ⌘K."}
+                        </p>
+                        {active === "bookmarks" ? (
+                            <BookmarksTab />
+                        ) : (
+                            <SnippetsTab />
+                        )}
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
+
+function NotesTabBody() {
     const [notes, setNotes] = useState<NoteSummary[]>([]);
     const [activeId, setActiveId] = useState<string | null>(null);
     const [draft, setDraft] = useState<Note | null>(null);

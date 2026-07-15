@@ -14,28 +14,29 @@ import { listOpenTasks, completeTask } from "@/db/repo/tasks";
 import { listApplications } from "@/db/repo/applications";
 import { searchLibrary, type LibraryHit } from "@/db/repo/library";
 import { openExternal } from "@/lib/openExternal";
-import type { Page } from "@/app/Sidebar";
+import type { NavTarget } from "@/app/Sidebar";
 import type { Application, Task } from "@/lib/schemas";
 import type { NoteSearchHit } from "@/db/repo/notes";
 
-const NAV: { page: Page; label: string }[] = [
-    { page: "home", label: "Home" },
-    { page: "chat", label: "Chat" },
-    { page: "agents", label: "Agents" },
-    { page: "notes", label: "Notes" },
-    { page: "tasks", label: "Tasks" },
-    { page: "applications", label: "Applications" },
-    { page: "review", label: "Review" },
-    { page: "library", label: "Library" },
-    { page: "presets", label: "Presets" },
-    { page: "permissions", label: "Permissions" },
-    { page: "settings", label: "Settings" },
+const NAV: { target: NavTarget; label: string }[] = [
+    { target: { page: "home" }, label: "Home" },
+    { target: { page: "chat" }, label: "Chat" },
+    { target: { page: "agents" }, label: "Agents" },
+    { target: { page: "notes" }, label: "Notes" },
+    { target: { page: "notes", tab: "bookmarks" }, label: "Bookmarks" },
+    { target: { page: "notes", tab: "snippets" }, label: "Snippets" },
+    { target: { page: "tasks" }, label: "Tasks" },
+    { target: { page: "applications" }, label: "Applications" },
+    { target: { page: "review" }, label: "Review" },
+    { target: { page: "presets" }, label: "Presets" },
+    { target: { page: "permissions" }, label: "Permissions" },
+    { target: { page: "settings" }, label: "Settings" },
 ];
 
 export function CommandPalette({
     onNavigate,
 }: {
-    onNavigate: (page: Page) => void;
+    onNavigate: (target: NavTarget) => void;
 }) {
     const [open, setOpen] = useState(false);
     const [query, setQuery] = useState("");
@@ -85,8 +86,8 @@ export function CommandPalette({
         setOpen(false);
         setQuery("");
     };
-    const go = (page: Page) => {
-        onNavigate(page);
+    const go = (target: NavTarget) => {
+        onNavigate(target);
         close();
     };
 
@@ -119,9 +120,9 @@ export function CommandPalette({
                         <Command.Group heading="Go to">
                             {NAV.map((n) => (
                                 <Item
-                                    key={n.page}
+                                    key={n.label}
                                     icon={Navigation}
-                                    onSelect={() => go(n.page)}
+                                    onSelect={() => go(n.target)}
                                 >
                                     {n.label}
                                 </Item>
@@ -181,7 +182,9 @@ export function CommandPalette({
                                     <Item
                                         key={a.id}
                                         icon={Briefcase}
-                                        onSelect={() => go("applications")}
+                                        onSelect={() =>
+                                            go({ page: "applications" })
+                                        }
                                     >
                                         {a.company} — {a.role}
                                         <span className="ml-2 font-mono text-[10px] text-muted-foreground">
@@ -198,7 +201,7 @@ export function CommandPalette({
                                     <Item
                                         key={n.id}
                                         icon={NotebookPen}
-                                        onSelect={() => go("notes")}
+                                        onSelect={() => go({ page: "notes" })}
                                     >
                                         {n.title}
                                         <span className="ml-2 truncate font-mono text-[10px] text-muted-foreground">

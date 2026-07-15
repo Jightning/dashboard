@@ -12,7 +12,7 @@ import { AgentEditor } from "./AgentEditor";
 import { AgentTestBench } from "./AgentTestBench";
 import { PipelinesTab } from "./PipelinesTab";
 import { AutomationsTab } from "./AutomationsTab";
-import { cn } from "@/lib/utils";
+import { TabBar } from "@/components/ui/tabs";
 
 type Tab = "roster" | "pipelines" | "automations";
 const TABS: { id: Tab; label: string }[] = [
@@ -37,33 +37,11 @@ export function AgentsPage() {
                         engine — nothing runs silently.
                     </p>
                 </header>
-                <TabBar tab={tab} onSelect={setTab} />
+                <TabBar tabs={TABS} active={tab} onSelect={setTab} />
                 {tab === "roster" && <RosterTab />}
                 {tab === "pipelines" && <PipelinesTab />}
                 {tab === "automations" && <AutomationsTab />}
             </div>
-        </div>
-    );
-}
-
-function TabBar({ tab, onSelect }: { tab: Tab; onSelect: (t: Tab) => void }) {
-    return (
-        <div className="flex gap-1 border-b border-border">
-            {TABS.map((t) => (
-                <button
-                    key={t.id}
-                    onClick={() => onSelect(t.id)}
-                    aria-current={tab === t.id ? "page" : undefined}
-                    className={cn(
-                        "cursor-pointer border-b-2 px-4 py-2 font-mono text-[11px] uppercase tracking-[0.18em] transition-colors duration-(--dur-fast) focus-visible:outline-2 focus-visible:outline-ring",
-                        tab === t.id
-                            ? "border-primary text-primary"
-                            : "border-transparent text-muted-foreground hover:text-foreground",
-                    )}
-                >
-                    {t.label}
-                </button>
-            ))}
         </div>
     );
 }

@@ -1,5 +1,4 @@
 import {
-    Bookmark,
     Briefcase,
     CalendarCheck,
     GraduationCap,
@@ -22,10 +21,14 @@ export type Page =
     | "tasks"
     | "applications"
     | "review"
-    | "library"
     | "presets"
     | "permissions"
     | "settings";
+
+export interface NavTarget {
+    page: Page;
+    tab?: string;
+}
 
 interface NavItem {
     page: Page;
@@ -49,7 +52,6 @@ const SECTIONS: { heading: string; items: NavItem[] }[] = [
             { page: "tasks", label: "Tasks", icon: CalendarCheck },
             { page: "applications", label: "Applications", icon: Briefcase },
             { page: "review", label: "Review", icon: GraduationCap },
-            { page: "library", label: "Library", icon: Bookmark },
         ],
     },
     {
