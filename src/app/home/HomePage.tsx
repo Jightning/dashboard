@@ -155,7 +155,7 @@ export function HomePage() {
                                 ))
                             ) : (
                                 <span className="text-xs text-muted-foreground">
-                                    No classes today.
+                                    Nothing scheduled today.
                                 </span>
                             )}
                         </Card>
@@ -190,8 +190,8 @@ export function HomePage() {
                                 ))
                             ) : (
                                 <span className="text-xs text-muted-foreground">
-                                    Nothing due. Suspicious — check the Tasks
-                                    page.
+                                    Nothing due. Suspicious — check the
+                                    Planner.
                                 </span>
                             )}
                             {today && (

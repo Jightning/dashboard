@@ -25,9 +25,10 @@ const NAV: { target: NavTarget; label: string }[] = [
     { target: { page: "notes" }, label: "Notes" },
     { target: { page: "notes", tab: "bookmarks" }, label: "Bookmarks" },
     { target: { page: "notes", tab: "snippets" }, label: "Snippets" },
-    { target: { page: "tasks" }, label: "Tasks" },
-    { target: { page: "applications" }, label: "Applications" },
-    { target: { page: "review" }, label: "Review" },
+    { target: { page: "planner", tab: "tasks" }, label: "Tasks" },
+    { target: { page: "planner", tab: "calendar" }, label: "Calendar" },
+    { target: { page: "planner", tab: "applications" }, label: "Applications" },
+    { target: { page: "planner", tab: "review" }, label: "Review" },
     { target: { page: "presets" }, label: "Presets" },
     { target: { page: "permissions" }, label: "Permissions" },
     { target: { page: "settings" }, label: "Settings" },
@@ -183,7 +184,10 @@ export function CommandPalette({
                                         key={a.id}
                                         icon={Briefcase}
                                         onSelect={() =>
-                                            go({ page: "applications" })
+                                            go({
+                                                page: "planner",
+                                                tab: "applications",
+                                            })
                                         }
                                     >
                                         {a.company} — {a.role}

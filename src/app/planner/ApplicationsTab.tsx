@@ -18,7 +18,7 @@ const COLUMNS: { status: ApplicationStatus; label: string }[] = [
 const CLOSED: ApplicationStatus[] = ["rejected", "ghosted"];
 const ALL_STATUSES = [...COLUMNS.map((c) => c.status), ...CLOSED];
 
-export function ApplicationsPage() {
+export function ApplicationsTab() {
     const [apps, setApps] = useState<Application[]>([]);
     const [showClosed, setShowClosed] = useState(false);
     const [editing, setEditing] = useState<Application | "new" | null>(null);
@@ -44,76 +44,69 @@ export function ApplicationsPage() {
     const closed = apps.filter((a) => CLOSED.includes(a.status));
 
     return (
-        <div className="h-full overflow-y-auto p-6">
-            <div className="mx-auto flex max-w-6xl flex-col gap-6">
-                <header className="flex items-end justify-between">
-                    <div>
-                        <h1 className="font-display text-2xl font-semibold tracking-wide">
-                            Applications
-                        </h1>
-                        <p className="mt-1 text-sm text-muted-foreground">
-                            {apps.length} tracked ·{" "}
-                            {apps.filter((a) => a.status === "applied").length}{" "}
-                            in flight · {closed.length} closed
-                        </p>
-                    </div>
-                    <Button onClick={() => setEditing("new")}>
-                        <Plus className="mr-1 h-3.5 w-3.5" /> Track application
-                    </Button>
-                </header>
-                {error && <p className="text-xs text-destructive">{error}</p>}
+        <div className="flex flex-col gap-6">
+            <div className="flex items-end justify-between">
+                <p className="text-sm text-muted-foreground">
+                    {apps.length} tracked ·{" "}
+                    {apps.filter((a) => a.status === "applied").length}{" "}
+                    in flight · {closed.length} closed
+                </p>
+                <Button onClick={() => setEditing("new")}>
+                    <Plus className="mr-1 h-3.5 w-3.5" /> Track application
+                </Button>
+            </div>
+            {error && <p className="text-xs text-destructive">{error}</p>}
 
-                {editing && (
-                    <ApplicationEditor
-                        key={editing === "new" ? "new" : editing.id}
-                        application={editing === "new" ? null : editing}
-                        onDone={async () => {
-                            setEditing(null);
-                            await reload();
-                        }}
-                    />
-                )}
+            {editing && (
+                <ApplicationEditor
+                    key={editing === "new" ? "new" : editing.id}
+                    application={editing === "new" ? null : editing}
+                    onDone={async () => {
+                        setEditing(null);
+                        await reload();
+                    }}
+                />
+            )}
 
-                <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-                    {COLUMNS.map((col) => (
-                        <div key={col.status} className="flex flex-col gap-2">
-                            <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-                                {col.label} ·{" "}
-                                {apps.filter((a) => a.status === col.status).length}
-                            </div>
-                            {apps
-                                .filter((a) => a.status === col.status)
-                                .map((a) => (
-                                    <AppCard
-                                        key={a.id}
-                                        app={a}
-                                        act={act}
-                                        onEdit={() => setEditing(a)}
-                                    />
-                                ))}
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+                {COLUMNS.map((col) => (
+                    <div key={col.status} className="flex flex-col gap-2">
+                        <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                            {col.label} ·{" "}
+                            {apps.filter((a) => a.status === col.status).length}
                         </div>
+                        {apps
+                            .filter((a) => a.status === col.status)
+                            .map((a) => (
+                                <AppCard
+                                    key={a.id}
+                                    app={a}
+                                    act={act}
+                                    onEdit={() => setEditing(a)}
+                                />
+                            ))}
+                    </div>
+                ))}
+            </div>
+
+            <button
+                className="cursor-pointer self-start font-mono text-[10px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
+                onClick={() => setShowClosed((s) => !s)}
+            >
+                {showClosed ? "hide" : "show"} closed ({closed.length})
+            </button>
+            {showClosed && (
+                <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+                    {closed.map((a) => (
+                        <AppCard
+                            key={a.id}
+                            app={a}
+                            act={act}
+                            onEdit={() => setEditing(a)}
+                        />
                     ))}
                 </div>
-
-                <button
-                    className="cursor-pointer self-start font-mono text-[10px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
-                    onClick={() => setShowClosed((s) => !s)}
-                >
-                    {showClosed ? "hide" : "show"} closed ({closed.length})
-                </button>
-                {showClosed && (
-                    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-                        {closed.map((a) => (
-                            <AppCard
-                                key={a.id}
-                                app={a}
-                                act={act}
-                                onEdit={() => setEditing(a)}
-                            />
-                        ))}
-                    </div>
-                )}
-            </div>
+            )}
         </div>
     );
 }

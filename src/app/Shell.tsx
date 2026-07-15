@@ -5,9 +5,7 @@ import { HomePage } from "./home/HomePage";
 import { ChatPage } from "./chat/ChatPage";
 import { AgentsPage } from "./agents/AgentsPage";
 import { NotesPage } from "./notes/NotesPage";
-import { TasksPage } from "./tasks/TasksPage";
-import { ApplicationsPage } from "./applications/ApplicationsPage";
-import { ReviewPage } from "./review/ReviewPage";
+import { PlannerPage } from "./planner/PlannerPage";
 import { SettingsPage } from "./settings/SettingsPage";
 import { PresetsPage } from "./presets/PresetsPage";
 import { PermissionsPage } from "./permissions/PermissionsPage";
@@ -21,9 +19,7 @@ const PAGES: Record<Page, () => React.JSX.Element> = {
     chat: ChatPage,
     agents: AgentsPage,
     notes: NotesPage,
-    tasks: TasksPage,
-    applications: ApplicationsPage,
-    review: ReviewPage,
+    planner: PlannerPage,
     presets: PresetsPage,
     permissions: PermissionsPage,
     settings: SettingsPage,
@@ -57,6 +53,8 @@ export function Shell() {
                         >
                             {nav.page === "notes" ? (
                                 <NotesPage tab={nav.tab} />
+                            ) : nav.page === "planner" ? (
+                                <PlannerPage tab={nav.tab} />
                             ) : (
                                 <Active />
                             )}

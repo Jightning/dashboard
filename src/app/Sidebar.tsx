@@ -1,7 +1,5 @@
 import {
-    Briefcase,
     CalendarCheck,
-    GraduationCap,
     LayoutDashboard,
     MessageSquare,
     Network,
@@ -18,9 +16,7 @@ export type Page =
     | "chat"
     | "agents"
     | "notes"
-    | "tasks"
-    | "applications"
-    | "review"
+    | "planner"
     | "presets"
     | "permissions"
     | "settings";
@@ -49,9 +45,7 @@ const SECTIONS: { heading: string; items: NavItem[] }[] = [
         heading: "Workspace",
         items: [
             { page: "notes", label: "Notes", icon: NotebookPen },
-            { page: "tasks", label: "Tasks", icon: CalendarCheck },
-            { page: "applications", label: "Applications", icon: Briefcase },
-            { page: "review", label: "Review", icon: GraduationCap },
+            { page: "planner", label: "Planner", icon: CalendarCheck },
         ],
     },
     {
