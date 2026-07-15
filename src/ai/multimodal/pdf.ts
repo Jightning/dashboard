@@ -10,6 +10,7 @@ export async function ingestPdf(opts: {
     data: Uint8Array;
     fileName: string;
     folder?: string;
+    projectId?: string | null;
 }): Promise<Document> {
     const pdf = await getDocumentProxy(opts.data);
     const { totalPages, text } = await extractText(pdf, { mergePages: true });
@@ -27,5 +28,6 @@ export async function ingestPdf(opts: {
         folder: opts.folder ?? "/",
         byteSize: opts.data.byteLength,
         pageCount: totalPages,
+        projectId: opts.projectId ?? null,
     });
 }

@@ -1,5 +1,6 @@
 import {
     CalendarCheck,
+    FolderKanban,
     LayoutDashboard,
     Network,
     NotebookPen,
@@ -13,6 +14,7 @@ import { cn } from "@/lib/utils";
 export type Page =
     | "home"
     | "agents"
+    | "projects"
     | "notes"
     | "planner"
     | "presets"
@@ -42,6 +44,7 @@ const SECTIONS: { heading: string; items: NavItem[] }[] = [
     {
         heading: "Workspace",
         items: [
+            { page: "projects", label: "Projects", icon: FolderKanban },
             { page: "notes", label: "Notes", icon: NotebookPen },
             { page: "planner", label: "Planner", icon: CalendarCheck },
         ],

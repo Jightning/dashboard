@@ -3,6 +3,7 @@ import { Pencil, Play, Plus, Trash2 } from "lucide-react";
 import * as automationsRepo from "@/db/repo/automations";
 import { listPipelines, listRuns } from "@/db/repo/pipelines";
 import { listLevels } from "@/db/repo/permissions";
+import { listProjects } from "@/db/repo/projects";
 import { runAutomation } from "@/ai/automations/run";
 import { appFetch } from "@/ai/providers/appFetch";
 import { useRuntime } from "@/app/runtime";
@@ -17,6 +18,7 @@ import type {
     PermissionLevel,
     Pipeline,
     PipelineRun,
+    Project,
     ScheduleKind,
 } from "@/lib/schemas";
 import { RunHistory } from "./RunHistory";
@@ -28,6 +30,7 @@ export function AutomationsTab() {
     const [automations, setAutomations] = useState<Automation[]>([]);
     const [pipelines, setPipelines] = useState<Pipeline[]>([]);
     const [levels, setLevels] = useState<PermissionLevel[]>([]);
+    const [projects, setProjects] = useState<Project[]>([]);
     const [editing, setEditing] = useState<Automation | "new" | null>(null);
     const [runsFor, setRunsFor] = useState<string | null>(null);
     const [runs, setRuns] = useState<PipelineRun[]>([]);
@@ -38,6 +41,7 @@ export function AutomationsTab() {
         setAutomations(await automationsRepo.listAutomations());
         setPipelines(await listPipelines());
         setLevels(await listLevels());
+        setProjects(await listProjects());
     }, []);
     useEffect(() => {
         void reload();
@@ -154,6 +158,7 @@ export function AutomationsTab() {
                     automation={editing === "new" ? null : editing}
                     pipelines={pipelines}
                     levels={levels}
+                    projects={projects}
                     onDone={async () => {
                         setEditing(null);
                         await reload();
@@ -183,11 +188,13 @@ function AutomationEditor({
     automation,
     pipelines,
     levels,
+    projects,
     onDone,
 }: {
     automation: Automation | null;
     pipelines: Pipeline[];
     levels: PermissionLevel[];
+    projects: Project[];
     onDone: () => Promise<void>;
 }) {
     const [form, setForm] = useState<automationsRepo.AutomationInput>(() =>
@@ -202,6 +209,7 @@ function AutomationEditor({
                   inputTemplate: automation.input_template,
                   permissionLevelId: automation.permission_level_id,
                   outputNoteFolder: automation.output_note_folder,
+                  projectId: automation.project_id,
               }
             : {
                   name: "",
@@ -213,6 +221,7 @@ function AutomationEditor({
                   inputTemplate: "",
                   permissionLevelId: null,
                   outputNoteFolder: "/automations",
+                  projectId: null,
               },
     );
     const [error, setError] = useState<string | null>(null);
@@ -374,6 +383,25 @@ function AutomationEditor({
                         />
                     </label>
                 </div>
+                <label className="flex w-64 flex-col gap-1 text-sm">
+                    Project
+                    <Select
+                        value={form.projectId ?? ""}
+                        onChange={(e) =>
+                            setForm({
+                                ...form,
+                                projectId: e.target.value || null,
+                            })
+                        }
+                    >
+                        <option value="">No project</option>
+                        {projects.map((p) => (
+                            <option key={p.id} value={p.id}>
+                                {p.name}
+                            </option>
+                        ))}
+                    </Select>
+                </label>
                 <div className="flex items-center gap-3">
                     <Button onClick={() => void save()}>Save</Button>
                     <Button variant="ghost" onClick={() => void onDone()}>
