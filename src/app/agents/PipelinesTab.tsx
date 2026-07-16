@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Pencil, Play, Plus, Trash2 } from "lucide-react";
 import * as pipelinesRepo from "@/db/repo/pipelines";
 import { listAgents } from "@/db/repo/agents";
@@ -95,7 +95,7 @@ export function PipelinesTab() {
         <div className="flex flex-col gap-4">
             <div className="flex items-end gap-3">
                 <label className="flex flex-1 flex-col gap-1 text-sm">
-                    Run input ({"{{input}}"} in step templates)
+                    What should this run start with?
                     <Input
                         value={runInput}
                         onChange={(e) => setRunInput(e.target.value)}
@@ -190,6 +190,32 @@ export function PipelinesTab() {
     );
 }
 
+export function TemplateChips({
+    tokens,
+    onInsert,
+}: {
+    tokens: { token: string; label: string }[];
+    onInsert: (token: string) => void;
+}) {
+    return (
+        <div className="flex flex-wrap items-center gap-1">
+            <span className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground">
+                insert
+            </span>
+            {tokens.map((t) => (
+                <button
+                    key={t.token}
+                    type="button"
+                    onClick={() => onInsert(t.token)}
+                    className="cursor-pointer rounded-sm border border-border px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground transition-colors hover:border-primary/50 hover:text-primary"
+                >
+                    {t.label}
+                </button>
+            ))}
+        </div>
+    );
+}
+
 function PipelineEditor({
     pipeline,
     agents,
@@ -203,6 +229,7 @@ function PipelineEditor({
     const [description, setDescription] = useState(pipeline?.description ?? "");
     const [steps, setSteps] = useState<StepDraft[]>([]);
     const [error, setError] = useState<string | null>(null);
+    const taRefs = useRef<(HTMLTextAreaElement | null)[]>([]);
 
     useEffect(() => {
         if (!pipeline) return;
@@ -246,6 +273,24 @@ function PipelineEditor({
             all.map((s, j) => (j === i ? { ...s, ...patch } : s)),
         );
 
+    const insertToken = (i: number, token: string) => {
+        const ta = taRefs.current[i];
+        const cur = steps[i]!.promptTemplate;
+        if (!ta) {
+            setStep(i, { promptTemplate: cur + token });
+            return;
+        }
+        const start = ta.selectionStart ?? cur.length;
+        const end = ta.selectionEnd ?? cur.length;
+        setStep(i, {
+            promptTemplate: cur.slice(0, start) + token + cur.slice(end),
+        });
+        requestAnimationFrame(() => {
+            ta.focus();
+            ta.selectionStart = ta.selectionEnd = start + token.length;
+        });
+    };
+
     return (
         <Card>
             <CardHeader>
@@ -253,8 +298,10 @@ function PipelineEditor({
                     {pipeline ? `Edit ${pipeline.name}` : "New pipeline"}
                 </CardTitle>
                 <p className="text-xs text-muted-foreground">
-                    Steps run in order. Templates: {"{{input}}"}, {"{{prev}}"},{" "}
-                    {"{{step1}}"}…, {"{{date}}"}.
+                    Steps run top to bottom. Each step sends its prompt to
+                    one agent. Use the insert buttons to reference the run
+                    input or an earlier step's output — no syntax to
+                    memorize.
                 </p>
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
@@ -312,12 +359,29 @@ function PipelineEditor({
                             </Button>
                         </div>
                         <Textarea
+                            ref={(el) => {
+                                taRefs.current[i] = el;
+                            }}
                             rows={2}
-                            placeholder="Prompt template for this step"
+                            placeholder="What should this agent do? e.g. Summarize the key points of {{prev}}"
                             value={s.promptTemplate}
                             onChange={(e) =>
                                 setStep(i, { promptTemplate: e.target.value })
                             }
+                        />
+                        <TemplateChips
+                            tokens={[
+                                { token: "{{input}}", label: "run input" },
+                                ...(i > 0
+                                    ? [{ token: "{{prev}}", label: "previous step" }]
+                                    : []),
+                                ...steps.slice(0, i).map((_, j) => ({
+                                    token: `{{step${j + 1}}}`,
+                                    label: `step ${j + 1} output`,
+                                })),
+                                { token: "{{date}}", label: "today's date" },
+                            ]}
+                            onInsert={(t) => insertToken(i, t)}
                         />
                     </div>
                 ))}

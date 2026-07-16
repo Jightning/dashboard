@@ -22,6 +22,7 @@ import type {
     ScheduleKind,
 } from "@/lib/schemas";
 import { RunHistory } from "./RunHistory";
+import { TemplateChips } from "./PipelinesTab";
 
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
@@ -348,7 +349,7 @@ function AutomationEditor({
                     )}
                 </div>
                 <label className="flex flex-col gap-1 text-sm">
-                    Input template ({"{{date}}"} available)
+                    What each run starts with
                     <Input
                         value={form.inputTemplate}
                         placeholder="e.g. Summarize https://news.ycombinator.com for {{date}}"
@@ -357,6 +358,15 @@ function AutomationEditor({
                         }
                     />
                 </label>
+                <TemplateChips
+                    tokens={[{ token: "{{date}}", label: "today's date" }]}
+                    onInsert={(t) =>
+                        setForm({
+                            ...form,
+                            inputTemplate: form.inputTemplate + t,
+                        })
+                    }
+                />
                 <div className="flex gap-3">
                     <label className="flex flex-1 flex-col gap-1 text-sm">
                         Permission level (out-of-level calls are denied)
