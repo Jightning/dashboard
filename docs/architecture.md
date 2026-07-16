@@ -50,7 +50,10 @@ Why this shape:
 
 ```txt
 src/
-  app/            Shell + pages: chat/, settings/, presets/, permissions/
+  app/            Shell + sections: home/, agents/ (chat, roster, pipelines,
+                  automations), projects/, notes/ (notes, bookmarks, snippets),
+                  planner/ (tasks, calendar, applications, review), presets/,
+                  permissions/, settings/
   components/     ui/ (shadcn), chat/ (MessageList, Composer, ApprovalCard,
                   TokenMeter, PresetPicker, PermissionLevelDropdown)
   ai/
