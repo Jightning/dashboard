@@ -12,7 +12,7 @@ import { maybeCompact } from "@/ai/context/compaction";
 import type { UsageCollector } from "@/ai/context/tokens";
 import type { ChatMessage, Preset } from "@/lib/schemas";
 
-/** Everything one chat session needs at send time. Built by ChatPage. */
+/** Everything one chat session needs at send time. Built by ChatWorkspace. */
 export interface SessionChatContext {
     sessionId: string;
     preset: Preset;
