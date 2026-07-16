@@ -1,1144 +1,928 @@
-# Agents Section Expansion — Implementation Plan
+# HUGH Overhaul Implementation Plan — everything in `docs/todo.md`
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Turn the read-only Agents page into the control center of the AI OS: user-defined agents (DB-backed CRUD over instructions/tools/model), a one-off test bench, multi-step pipelines that chain agents, and scheduled automations that run pipelines unattended — all behind the existing permission engine.
+**Goal:** Fix the two visual defects, de-duplicate the permission dropdown, restructure the app into four comprehensible sections (Agents-with-chat, Projects, Notes-with-library, Planner-with-courses), add Projects (files + project chats + project bookmarks + automations + their own star on the network), make the network sphere scale past ~10 chats via an archive layer, add chat rename/recolor, and add category filtering to bookmarks/snippets/tasks.
 
-**Architecture:** Replace the hardcoded `knowledge`/`research` agent enum with an `agents` table; the orchestrator builds delegation tools dynamically from enabled agent rows, and a shared tool catalog lets each agent pick its gated tool subset. Pipelines are ordered steps (agent + prompt template) executed sequentially by a runner that persists run/step history; automations are schedules (interval/daily/weekly) that run a pipeline headlessly with a chosen permission level (anything outside it auto-denies) and can save the final output as a note.
+**Architecture:** Everything stays a local-first Tauri 2 + React SPA over one SQLite file. Schema changes are two new migrations (`0010` collapses the duplicate "Ask everything" level into `NULL`; `0011` adds `projects` plus `project_id`/`color`/`group_name` columns). New data flows through the existing repo pattern (typed SQL + zod row parsing). The UI overhaul is a re-hosting exercise: existing page bodies become tabs inside three section pages, navigated by a `NavTarget { page, tab }` that the sidebar and ⌘K palette both use. The network sphere gets a new pure builder (`buildUniverseNetwork`) that renders project stars with document satellites and folds old chats into one expandable "archive" star, so node count stays bounded no matter how many chats exist.
 
-**Tech Stack:** Existing stack only — Tauri 2, React 19, TypeScript, Vercel AI SDK v7 (`ToolLoopAgent`), SQLite (tauri-plugin-sql / sqlite-wasm), zod v4, Tailwind v4, vitest + better-sqlite3. **No new dependencies.**
+**Tech Stack:** React 19, TypeScript strict, Tailwind v4, motion, lucide-react, zod, SQLite (tauri-plugin-sql / sqlite-wasm+OPFS / better-sqlite3 in tests), Vercel AI SDK. **No new dependencies.**
 
 ## Global Constraints
 
-- No new npm dependencies; no agent framework — compose on `ToolLoopAgent` + `tool()` from `ai`.
-- Every agent tool call goes through `PermissionContext.gated(...)` — nothing runs silently (project's hard rule).
-- New migrations: add `src-tauri/migrations/000N_*.sql` **and** register in `src-tauri/src/lib.rs` (`migrations()` vec). The web worker (`import.meta.glob`) and `testClient.ts` (readdir) pick up new `.sql` files automatically.
-- Both targets must work: Tauri desktop and web (`isWebBrowser()`); all logic stays in TS, none in Rust.
-- Design system (docs/design.md): tokens only, no hardcoded colors except data-driven agent colors via inline `style`; data renders in `font-mono`; approvals are always amber (`ApprovalCards`); page skeleton = `h-full overflow-y-auto p-6` → centered column → `font-display` h1; icons from lucide only.
-- Fail fast: throw on bad preconditions (unknown tool name, empty pipeline, bad template variable) — no silent fallbacks.
-- Tests: `npx vitest run <file>`; whole suite `npm test`; types `npm run typecheck`. Run both before every commit.
-- Commit style: existing repo uses `feat:`-style one-liners.
-- The dev database migrates forward only — never edit a shipped migration file; new schema = new migration.
+- **$0 budget:** no new npm packages, no services, no paid APIs. Every task below uses only dependencies already in `package.json`.
+- **Three DB clients, one schema:** every schema change is a new `src-tauri/migrations/00NN_name.sql` file **and** a new `Migration` entry in `src-tauri/src/lib.rs` (`version: NN`). The web worker (`import.meta.glob`) and vitest (`testClient.ts` reads the directory) pick the file up automatically — no other registration.
+- **Migration content rule:** `ALTER TABLE … ADD COLUMN` only with NULL/constant defaults (SQLite limitation). Never rely on `PRAGMA foreign_keys` for cascades in new code — do explicit `UPDATE`s (the three clients differ).
+- **Perf contract (WSLg):** no SVG filters, no `backdrop-blur`, no per-frame allocations in HUD components. Canvas/SVG attribute writes inside one rAF only.
+- **Schema mirror:** every new column appears in the matching zod schema in `src/lib/schemas.ts` (`z.object` is non-strict, so land the migration first, then the schema, then the repo).
+- **Gates:** `npm run typecheck` and `npm test` must pass before every commit. UI-only steps get a manual verification step via `npm run dev` (browser target is enough; it exercises the same code).
+- **Copy voice:** plain language first, observatory flavor second. Remove student-specific copy from general surfaces ("classes", "ECE 437", "assignments") — courses remain a feature, scoped to the Planner → Calendar tab.
+- **Style:** 4-space indent, double quotes, `cn()` for class merging, repos throw on missing rows, `void` prefix for fire-and-forget promises — match the file you are editing.
+- Work on a branch: `git checkout -b feat/todo-overhaul` before Task 1.
 
-## What this builds (spec)
-
-**Milestone A — DB-backed custom agents (Tasks 1–6).** An `agents` table seeded with the existing knowledge/research agents as builtin rows. Each agent: name, description (what the orchestrator sees), instructions (its system prompt), tool subset from a central catalog, optional model override (e.g. cheap model for summarizer agents, big model for coding help), max steps, color. Presets reference agent ids; the orchestrator exposes one `ask_<slug>_agent` delegation tool per enabled agent. Includes a new `write_note` tool (write-gated) so agents can produce durable output.
-
-**Milestone B — Agents page: roster + test bench (Tasks 7–8).** The Agents page becomes tabbed (Roster / Pipelines / Automations). Roster: the network sphere driven by real DB agents plus create/edit/duplicate/delete cards. Test bench: pick an agent, type a task, run it once against your default models with live approval cards and a usage readout — the fast loop for iterating on instructions.
-
-**Milestone C — Pipelines (Tasks 9–12).** A pipeline = named ordered steps; each step = agent + prompt template with `{{input}}`, `{{prev}}`, `{{stepN}}`, `{{date}}` variables. A sequential runner persists `pipeline_runs` / `pipeline_step_runs` (prompt, output, status, error, timing). UI: builder, manual run with approval cards, expandable run history. Example use: "fetch HN front page → research agent summarizes → writer agent drafts a note".
-
-**Milestone D — Automations (Tasks 13–15).** An automation = pipeline + schedule (`interval` minutes / `daily` HH:MM / `weekly` day+HH:MM) + input template + permission level + optional output-note folder. A scheduler ticks while the app is open, claims due automations, runs them headlessly (approvals auto-deny — no one is watching), and saves the final output as a note (which the knowledge agent can then read — closing the loop). UI: CRUD, enable toggle, next/last run readouts, run-now, history.
-
-Deliberately out of scope (YAGNI, revisit later): parallel/branching pipeline graphs, cron expressions, agent-to-agent free-form chat, background execution while the app is closed (no server process by design), per-step model overrides (the per-agent override covers it).
-
-## File structure
+## File Structure (what exists after the plan)
 
 ```txt
-Create:
-  src-tauri/migrations/0003_agents.sql        agents table + preset json rewrite
-  src-tauri/migrations/0004_pipelines.sql     pipelines, steps, runs, step_runs
-  src-tauri/migrations/0005_automations.sql   automations (+ pipeline_runs.automation_id)
-  src/db/repo/agents.ts                       agent CRUD + builtin seeds
-  src/db/repo/agents.test.ts
-  src/db/repo/pipelines.ts                    pipeline/step/run CRUD
-  src/db/repo/pipelines.test.ts
-  src/db/repo/automations.ts                  automation CRUD + due queries
-  src/db/repo/automations.test.ts
-  src/ai/tools/catalog.ts                     TOOL_CATALOG + buildToolSet()
-  src/ai/tools/catalog.test.ts
-  src/ai/agents/factory.ts                    createAgentFromDef()
-  src/ai/agents/factory.test.ts
-  src/ai/pipelines/runner.ts                  sequential pipeline executor
-  src/ai/pipelines/runner.test.ts
-  src/ai/automations/schedule.ts              computeNextRun() (pure)
-  src/ai/automations/schedule.test.ts
-  src/ai/automations/run.ts                   headless run: auto-deny permissions, note output
-  src/ai/automations/scheduler.ts             tick loop, claims due automations
-  src/ai/automations/scheduler.test.ts
-  src/ai/providers/appFetch.ts                shared Tauri/browser fetch pick
-  src/lib/template.ts                         renderTemplate()
-  src/lib/template.test.ts
-  src/app/agents/AgentEditor.tsx              agent create/edit form
-  src/app/agents/AgentTestBench.tsx           one-off agent run panel
-  src/app/agents/PipelinesTab.tsx             pipeline builder + manual runs
-  src/app/agents/RunHistory.tsx               shared run/step-run list
-  src/app/agents/AutomationsTab.tsx           automation CRUD + history
+src-tauri/migrations/
+  0010_permission_cleanup.sql      NEW  kill duplicate "Ask everything" level
+  0011_projects.sql                NEW  projects + project_id/color/group_name cols
+src-tauri/src/lib.rs               MOD  register versions 10 & 11
+src/lib/schemas.ts                 MOD  projectSchema; new columns on 5 schemas
+src/db/repo/projects.ts            NEW  project CRUD + counts
+src/db/repo/projects.test.ts       NEW
+src/db/repo/{sessions,library,documents,automations,permissions,presets}.ts  MOD
+src/components/ui/tabs.tsx         NEW  shared TabBar (extracted from AgentsPage)
+src/components/ui/filterChips.tsx  NEW  category filter row
+src/components/PermissionLevelSelect.tsx  NEW  the only place "no level" renders
+src/components/chat/Composer.tsx   MOD  aligned, auto-growing input
+src/components/hud/GridBackground.tsx  MOD  halo + tapered-spike stars
+src/components/hud/NetworkSphere.tsx   MOD  tapered diamond spikes
+src/components/hud/networkData.ts      MOD  buildUniverseNetwork, archive layer
+src/components/hud/networkData.test.ts NEW
+src/app/Shell.tsx                  MOD  NavTarget state, new PAGES
+src/app/Sidebar.tsx                MOD  4-section IA
+src/app/components/palette/CommandPalette.tsx  MOD  NavTarget entries
+src/app/agents/AgentsPage.tsx      MOD  Chat|Roster|Pipelines|Automations tabs
+src/app/agents/PipelinesTab.tsx    MOD  template chips, plain-language copy
+src/app/agents/AutomationsTab.tsx  MOD  PermissionLevelSelect, project select
+src/app/chat/ChatWorkspace.tsx     MOV  from ChatPage.tsx; project-aware
+src/app/chat/InstancesSidebar.tsx  MOD  rename/recolor, project grouping, "Chats"
+src/app/notes/NotesPage.tsx        MOD  Notes|Bookmarks|Snippets tabs
+src/app/notes/BookmarksTab.tsx     NEW  from LibraryPage, + filters/edit/project
+src/app/notes/SnippetsTab.tsx      NEW  from LibraryPage, + groups/filters/edit
+src/app/planner/PlannerPage.tsx    NEW  Tasks|Calendar|Applications|Review tabs
+src/app/planner/TasksTab.tsx       MOV  from tasks/TasksPage.tsx (tasks half)
+src/app/planner/CalendarTab.tsx    NEW  WeekEvents + CoursesPanel (other half)
+src/app/planner/ApplicationsTab.tsx MOV from applications/ApplicationsPage.tsx
+src/app/planner/ReviewTab.tsx      MOV  from review/ReviewPage.tsx
+src/app/projects/ProjectsPage.tsx  NEW  list/create/open
+src/app/projects/ProjectDetail.tsx NEW  files, chats, bookmarks, automations
+src/app/library/                   DEL  (content lives in notes/ tabs)
+src/app/tasks/, src/app/applications/, src/app/review/  DEL (moved to planner/)
+```
 
-Modify:
-  src-tauri/src/lib.rs                        register migrations 3–5
-  src/lib/schemas.ts                          agentDefSchema, pipeline/automation schemas,
-                                              presetAgents → string ids, drop AgentName
-  src/ai/agents/types.ts                      AgentRuntime.resolveModel; usage agent: string
-  src/ai/agents/orchestrator.ts               dynamic delegation tools from AgentDef[]
-  src/ai/agents/runtime.ts                    buildSessionAgent loads defs; buildPipelineRuntime
-  src/ai/agents/agents.test.ts                defs instead of enum
-  src/ai/tools/notes.ts                       add write_note tool + scope resolver
-  src/ai/tools/tools.test.ts                  write_note cases
-  src/ai/tools/index.ts                       (unchanged exports — resolvers spread already)
-  src/db/repo/presets.ts                      enabledAgents: string[]; seeds use agt_ ids
-  src/app/bootstrap.ts                        seedBuiltinAgents()
-  src/app/agents/AgentsPage.tsx               tabs + DB-driven roster
-  src/app/chat/ChatPage.tsx                   loads agents; passes to network builders
-  src/app/presets/PresetsPage.tsx             agent checkboxes from DB
-  src/components/hud/networkData.ts           builders take AgentDef[]
-  evals/router.eval.ts                        inline AgentDef fixtures
+Deliberately **not** done (YAGNI): `notes.project_id` (projects group chats/files/bookmarks/automations only — the todo doesn't ask for project notes), tags on tasks (courses already are the category), FTS on bookmarks/snippets (tables are tiny; LIKE search stays).
 
-Delete (Task 6):
-  src/ai/agents/knowledge.ts                  instructions move to seeds
-  src/ai/agents/research.ts                   instructions move to seeds
-  src/components/hud/agentCatalog.ts          replaced by DB agents
+---
+
+### Task 1: Composer input alignment + auto-grow
+
+The bug: icon buttons are `h-9` (36px) but the textarea is `rows={2}` with `py-1.5`, inside an `items-end` row — so the placeholder's first line floats above the buttons' text baseline. Fix by making the textarea exactly one 36px line when empty (matching `h-9`), growing with content like every modern chat input.
+
+**Files:**
+- Modify: `src/components/chat/Composer.tsx` (imports, ~line 1; textarea block, lines 185–210)
+
+**Interfaces:**
+- Consumes: nothing new.
+- Produces: no API change — `Composer` props are untouched.
+
+- [ ] **Step 1: Add the auto-size effect**
+
+In `Composer.tsx`, change the react import (line 1) and add a ref + effect after the existing `recorderRef` declaration (line 42):
+
+```tsx
+import { useEffect, useRef, useState } from "react";
+```
+
+```tsx
+    const taRef = useRef<HTMLTextAreaElement>(null);
+
+    // One line (36px = h-9, matching the icon buttons) when empty; grows with
+    // content up to max-h-40, then scrolls. Runs on every text change,
+    // including the post-send reset to "".
+    useEffect(() => {
+        const ta = taRef.current;
+        if (!ta) return;
+        ta.style.height = "auto";
+        ta.style.height = `${Math.min(ta.scrollHeight, 160)}px`;
+    }, [text]);
+```
+
+- [ ] **Step 2: Update the textarea element**
+
+Replace the opening of the `<textarea>` (lines 185–187):
+
+```tsx
+                    <textarea
+                        rows={2}
+                        className="flex-1 resize-none bg-transparent px-2 py-1.5 text-sm placeholder:text-muted-foreground focus-visible:outline-none disabled:opacity-50"
+```
+
+with:
+
+```tsx
+                    <textarea
+                        ref={taRef}
+                        rows={1}
+                        className="max-h-40 flex-1 resize-none bg-transparent px-2 py-2 text-sm leading-5 placeholder:text-muted-foreground focus-visible:outline-none disabled:opacity-50"
+```
+
+(`py-2` = 8px×2 + `leading-5` = 20px → 36px total, identical to the `h-9` buttons; the surrounding `items-end` row now bottom-aligns everything on the same 36px baseline and keeps buttons pinned to the bottom as the textarea grows.)
+
+- [ ] **Step 3: Typecheck**
+
+Run: `npm run typecheck`
+Expected: exit 0.
+
+- [ ] **Step 4: Manual verify**
+
+Run: `npm run dev`, open a chat. Verify: (a) empty composer — placeholder text sits on the same baseline as the send-button icon; (b) typing 10 lines grows the box to ~160px then scrolls inside; (c) sending resets to one line.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/components/chat/Composer.tsx
+git commit -m "fix: align composer input with buttons, auto-grow with content"
 ```
 
 ---
 
-## Milestone A — DB-backed custom agents
+### Task 2: Star rendering — soft halos and tapered spikes
 
-### Task 1: `agents` table migration + zod schema
+The todo: stars are "just two lines" and the lines are "too obvious". Two renderers draw the two-line cross: the canvas star field (`GridBackground.tsx:47-56`) and the sphere's diffraction spikes (`NetworkSphere.tsx:349-365`). Replace both with a soft radial halo + four *tapered* spikes (thin triangles that fade by geometry — wide at the core, vanishing at the tip). No filters, still zero per-frame cost for the background.
 
 **Files:**
-- Create: `src-tauri/migrations/0003_agents.sql`
-- Modify: `src-tauri/src/lib.rs`
-- Modify: `src/lib/schemas.ts` (append only in this task — the enum sweep is Task 6)
-- Test: `src/db/repo/agents.test.ts` (created here, grows in Task 2)
+- Modify: `src/components/hud/GridBackground.tsx:47-56`
+- Modify: `src/components/hud/NetworkSphere.tsx` (spike markup lines 349–365, spike updates in `draw()` lines 133–144)
+
+**Interfaces:** none — both are self-contained renderers.
+
+- [ ] **Step 1: Rewrite the bright-star branch in GridBackground**
+
+Replace lines 45–56 (`// The brightest few get a fine diffraction cross …` through the `ctx.stroke();` and its closing brace) with:
+
+```ts
+            // The brightest few get a soft halo + four tapered diffraction
+            // spikes — thin triangles that fade by shape instead of hard
+            // stroked lines.
+            if (mag > 0.97) {
+                const halo = ctx.createRadialGradient(x, y, 0, x, y, r * 5);
+                halo.addColorStop(0, "oklch(0.9 0.03 85 / 0.3)");
+                halo.addColorStop(1, "oklch(0.9 0.03 85 / 0)");
+                ctx.fillStyle = halo;
+                ctx.beginPath();
+                ctx.arc(x, y, r * 5, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.fillStyle = "oklch(0.9 0.03 85 / 0.14)";
+                const len = r * 7;
+                const half = r * 0.35;
+                for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+                    ctx.beginPath();
+                    ctx.moveTo(x - dy * half, y + dx * half);
+                    ctx.lineTo(x + dy * half, y - dx * half);
+                    ctx.lineTo(x + dx * len, y + dy * len);
+                    ctx.closePath();
+                    ctx.fill();
+                }
+            }
+```
+
+Also update the component doc comment (lines 3–8): change "two faint great-circle graticule arcs" sentence's neighbor "a static star field (drawn once to canvas)" to "a static star field (drawn once to canvas; bright stars get soft halos + tapered spikes)".
+
+- [ ] **Step 2: Replace the sphere's two-line spikes with tapered diamonds**
+
+In `NetworkSphere.tsx`, the spike `<g>` (lines 350–365) currently strokes two lines. Replace the JSX with fill-based tapered diamonds (a classic four-point star made of two thin crossing diamonds):
+
+```tsx
+                {/* Diffraction spikes — primary stars only, positioned by the rAF loop.
+                    Two thin diamonds = a tapered four-point star; fill-based, no strokes. */}
+                {nodes.map((n, i) =>
+                    n.primary ? (
+                        <g
+                            key={`spike-${n.id}`}
+                            ref={(el) => {
+                                spikeEls.current[i] = el;
+                            }}
+                            transform={`translate(${seed[i]!.cx} ${seed[i]!.cy}) scale(${n.r * 3.2})`}
+                            fill={n.color}
+                            fillOpacity={(0.35 + 0.65 * seed[i]!.depth) * 0.45}
+                        >
+                            <path d="M -1 0 L 0 0.07 L 1 0 L 0 -0.07 Z" />
+                            <path d="M 0 -1 L 0.07 0 L 0 1 L -0.07 0 Z" />
+                        </g>
+                    ) : null,
+                )}
+```
+
+- [ ] **Step 3: Update the spike writes in `draw()`**
+
+Replace the spike block inside `draw()` (lines 133–144):
+
+```ts
+                const spike = spikeEls.current[i];
+                if (spike) {
+                    const len = node.r * rScale * 3.2;
+                    spike.setAttribute(
+                        "transform",
+                        `translate(${p.cx} ${p.cy}) scale(${len})`,
+                    );
+                    // Softer than the star body; vanishes with depth like everything else.
+                    spike.setAttribute("fill-opacity", String(op * 0.45));
+                }
+```
+
+(The `stroke-opacity` and `stroke-width` writes are gone — fills need neither.)
+
+- [ ] **Step 4: Typecheck + manual verify**
+
+Run: `npm run typecheck` → exit 0.
+Run: `npm run dev` → background stars: bright ones read as glowing points with subtle rays, no hard crosses; Chat page sphere: primary nodes show soft four-point stars that still scale/fade with rotation and hover.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/components/hud/GridBackground.tsx src/components/hud/NetworkSphere.tsx
+git commit -m "art: soften stars — halos + tapered spikes replace two-line crosses"
+```
+
+---
+
+### Task 3: Kill the duplicate "Ask everything" (root cause)
+
+Root cause: "no permissions" has **two representations** — `permission_level_id = NULL` (hardcoded `<option value="">Ask everything</option>` in `ChatPage.tsx:273`, `PipelinesTab.tsx:110`, `PresetsPage.tsx:285`) *and* a seeded builtin row `lvl_ask_everything` with zero grants (behaviorally identical in the engine). Every dropdown that renders both shows the duplicate. Fix: NULL becomes the *only* representation — migrate the builtin row away, stop seeding it, and route all four dropdowns through one shared component so this can't regress.
+
+**Files:**
+- Create: `src-tauri/migrations/0010_permission_cleanup.sql`
+- Create: `src/components/PermissionLevelSelect.tsx`
+- Modify: `src-tauri/src/lib.rs` (append migration 10)
+- Modify: `src/db/repo/permissions.ts:12-39` (drop the askEverything constant + seed)
+- Modify: `src/db/repo/presets.ts:39` (`permissionLevelId: null`)
+- Modify: `src/app/chat/ChatPage.tsx:244-282` (LevelDropdown), `src/app/agents/PipelinesTab.tsx:104-117`, `src/app/agents/AutomationsTab.tsx:350-369`, `src/app/presets/PresetsPage.tsx:273-292`
+- Test: `src/db/db.test.ts:200-250` (seed + builtin-delete assertions)
 
 **Interfaces:**
-- Produces: `agents` table; `agentDefSchema`/`AgentDef`; `agentToolNames(def): string[]`; `agentSlug(name): string`; `delegationToolName(def): string`. Later tasks import all four from `@/lib/schemas`.
+- Consumes: `PermissionLevel` from `@/lib/schemas`, `Select` from `@/components/ui/select`.
+- Produces: `PermissionLevelSelect({ levels, value, onChange, nullLabel?, className, "aria-label"? })` where `value: string | null`, `onChange: (levelId: string | null) => void`, `nullLabel` defaults to `"Ask everything"`. `BUILTIN_LEVELS` shrinks to `{ readDocuments }` — later tasks must not reference `askEverything`.
 
 - [ ] **Step 1: Write the failing test**
 
+In `src/db/db.test.ts`, find the seed assertion around line 209 (it asserts `"Ask everything"` is among seeded levels) and the builtin-delete test at line 245 (`permissions.deleteLevel(permissions.BUILTIN_LEVELS.askEverything)`). Change them to:
+
 ```ts
-// src/db/repo/agents.test.ts
+        // seed test: only Read documents is a builtin row now; "Ask everything" is NULL
+        expect(levels.map((l) => l.name)).toEqual(["Read documents"]);
+```
+
+```ts
+        await expect(
+            permissions.deleteLevel(permissions.BUILTIN_LEVELS.readDocuments),
+        ).rejects.toThrow(/built-in/);
+```
+
+(Adapt to the surrounding test's exact shape — the intent: seeding produces exactly one builtin level named "Read documents", and deleting a builtin still throws.)
+
+- [ ] **Step 2: Run to verify it fails**
+
+Run: `npx vitest run src/db/db.test.ts`
+Expected: FAIL — seeded levels still include "Ask everything", and `BUILTIN_LEVELS.askEverything` still typechecks.
+
+- [ ] **Step 3: Create the migration**
+
+Create `src-tauri/migrations/0010_permission_cleanup.sql`:
+
+```sql
+-- "Ask everything" existed twice: as permission_level_id = NULL and as a
+-- seeded builtin row with zero grants. Dropdowns listed both. NULL is the
+-- single representation from now on.
+
+UPDATE presets SET permission_level_id = NULL WHERE permission_level_id = 'lvl_ask_everything';
+UPDATE chat_sessions SET permission_level_id = NULL WHERE permission_level_id = 'lvl_ask_everything';
+UPDATE automations SET permission_level_id = NULL WHERE permission_level_id = 'lvl_ask_everything';
+DELETE FROM permission_grants WHERE level_id = 'lvl_ask_everything';
+DELETE FROM permission_levels WHERE id = 'lvl_ask_everything';
+```
+
+Append to `src-tauri/src/lib.rs` inside the `vec![…]` (after version 9):
+
+```rust
+        Migration {
+            version: 10,
+            description: "collapse Ask-everything level into NULL",
+            sql: include_str!("../migrations/0010_permission_cleanup.sql"),
+            kind: MigrationKind::Up,
+        },
+```
+
+- [ ] **Step 4: Stop seeding it**
+
+In `src/db/repo/permissions.ts`:
+- Change the constant (lines 12–16) to:
+
+```ts
+/** Stable ids so seeding is idempotent and presets can reference them. */
+export const BUILTIN_LEVELS = {
+    readDocuments: "lvl_read_documents",
+} as const;
+```
+
+- In `seedBuiltinLevels()`, delete the first `INSERT OR IGNORE` block (lines 20–29, the one inserting `BUILTIN_LEVELS.askEverything, "Ask everything", …`). Keep the readDocuments insert and its grants.
+
+In `src/db/repo/presets.ts:39` change `permissionLevelId: BUILTIN_LEVELS.askEverything,` to `permissionLevelId: null,`.
+
+- [ ] **Step 5: Run tests to verify they pass**
+
+Run: `npm test`
+Expected: PASS (the migration runs in testClient automatically; if any other test references `askEverything`, switch it to `readDocuments` or `null` following the same intent).
+
+- [ ] **Step 6: Create the shared dropdown**
+
+Create `src/components/PermissionLevelSelect.tsx`:
+
+```tsx
+import { Select } from "@/components/ui/select";
+import type { PermissionLevel } from "@/lib/schemas";
+
+/**
+ * The one place "no permission level" (null) is rendered as an option.
+ * Levels come from the DB; the null option is synthetic — so "Ask everything"
+ * can never appear twice again.
+ */
+export function PermissionLevelSelect({
+    levels,
+    value,
+    onChange,
+    nullLabel = "Ask everything",
+    className,
+    "aria-label": ariaLabel,
+}: {
+    levels: PermissionLevel[];
+    value: string | null;
+    onChange: (levelId: string | null) => void;
+    /** Automations deny instead of asking — callers override the null copy. */
+    nullLabel?: string;
+    className?: string;
+    "aria-label"?: string;
+}) {
+    return (
+        <Select
+            className={className}
+            aria-label={ariaLabel}
+            value={value ?? ""}
+            onChange={(e) => onChange(e.target.value || null)}
+        >
+            <option value="">{nullLabel}</option>
+            {levels.map((l) => (
+                <option key={l.id} value={l.id}>
+                    {l.name}
+                </option>
+            ))}
+        </Select>
+    );
+}
+```
+
+- [ ] **Step 7: Replace the four dropdowns**
+
+1. `src/app/chat/ChatPage.tsx` — in `LevelDropdown` (lines 268–279), replace the `<Select>…</Select>` with:
+
+```tsx
+            <PermissionLevelSelect
+                className="h-8 font-mono text-xs normal-case tracking-normal"
+                levels={levels}
+                value={levelId || null}
+                onChange={(id) => void change(id ?? "")}
+            />
+```
+
+(keep `change` accepting a string: `const change = async (value: string) => …` already maps `"" → null`.) Add the import, remove the now-unused `Select` import if nothing else uses it.
+
+2. `src/app/agents/PipelinesTab.tsx:106-116` — replace the `<Select>` block with:
+
+```tsx
+                    <PermissionLevelSelect
+                        levels={levels}
+                        value={levelId || null}
+                        onChange={(id) => setLevelId(id ?? "")}
+                    />
+```
+
+3. `src/app/agents/AutomationsTab.tsx:353-368` — replace with:
+
+```tsx
+                        <PermissionLevelSelect
+                            levels={levels}
+                            value={form.permissionLevelId}
+                            nullLabel="None (deny all tool calls)"
+                            onChange={(id) =>
+                                setForm({ ...form, permissionLevelId: id })
+                            }
+                        />
+```
+
+4. `src/app/presets/PresetsPage.tsx:276-291` — replace with:
+
+```tsx
+                        <PermissionLevelSelect
+                            levels={levels}
+                            value={form.permissionLevelId}
+                            nullLabel="Ask everything (no level)"
+                            onChange={(id) =>
+                                setForm({ ...form, permissionLevelId: id })
+                            }
+                        />
+```
+
+In each file remove the `Select` import when it becomes unused.
+
+- [ ] **Step 8: Verify**
+
+Run: `npm run typecheck && npm test` → both pass.
+Run: `npm run dev` → chat header permission dropdown lists "Ask everything" exactly once, followed by "Read documents" (+ any custom levels). An existing session that had the old builtin level selected shows "Ask everything".
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add src-tauri/migrations/0010_permission_cleanup.sql src-tauri/src/lib.rs \
+  src/db/repo/permissions.ts src/db/repo/presets.ts src/db/db.test.ts \
+  src/components/PermissionLevelSelect.tsx src/app/chat/ChatPage.tsx \
+  src/app/agents/PipelinesTab.tsx src/app/agents/AutomationsTab.tsx \
+  src/app/presets/PresetsPage.tsx
+git commit -m "fix: collapse duplicate Ask-everything level into NULL, shared level select"
+```
+
+---
+
+### Task 4: Projects data layer (migration, schema, repo)
+
+**Files:**
+- Create: `src-tauri/migrations/0011_projects.sql`
+- Create: `src/db/repo/projects.ts`
+- Test: `src/db/repo/projects.test.ts`
+- Modify: `src-tauri/src/lib.rs` (append migration 11), `src/lib/schemas.ts`
+
+**Interfaces:**
+- Produces (used by every later task):
+  - `projectSchema` / `type Project = { id; name; description: string|null; color: string|null; created_at; updated_at }`
+  - `chatSessionSchema` gains `project_id: string|null`, `color: string|null`
+  - `documentSchema`, `bookmarkSchema`, `automationSchema` gain `project_id: string|null`
+  - `snippetSchema` gains `group_name: string`
+  - Repo: `createProject({name, description?, color?})`, `getProject(id)`, `listProjects()`, `updateProject(id, {name?, description?, color?})`, `deleteProject(id)`, `projectCounts(id): Promise<ProjectCounts>` with `ProjectCounts = { sessions: number; documents: number; bookmarks: number; automations: number }`
+
+- [ ] **Step 1: Write the failing test**
+
+Create `src/db/repo/projects.test.ts`:
+
+```ts
 import { beforeEach, afterEach, describe, expect, it } from "vitest";
 import { createTestDbClient } from "@/db/testClient";
 import { setDb, getDb } from "@/db/client";
-import { agentSlug, delegationToolName, type AgentDef } from "@/lib/schemas";
+import {
+    createProject,
+    deleteProject,
+    getProject,
+    listProjects,
+    projectCounts,
+    updateProject,
+} from "./projects";
+import { createSession, getSession, listSessions } from "./sessions";
+import { createBookmark, listBookmarks } from "./library";
 
 let db: ReturnType<typeof createTestDbClient>;
-
 beforeEach(() => {
     db = createTestDbClient();
     setDb(db);
 });
+afterEach(() => db.close());
 
-afterEach(() => {
-    db.close();
-});
+describe("projects repo", () => {
+    it("creates, lists, and updates projects", async () => {
+        const p = await createProject({ name: "Thesis", color: "#22d3ee" });
+        expect(p.name).toBe("Thesis");
+        expect(p.color).toBe("#22d3ee");
+        expect((await listProjects()).map((x) => x.id)).toEqual([p.id]);
 
-describe("agents migration", () => {
-    it("creates the agents table with defaults", async () => {
+        const updated = await updateProject(p.id, { description: "senior design" });
+        expect(updated.description).toBe("senior design");
+        expect(updated.name).toBe("Thesis");
+    });
+
+    it("rejects empty names and missing ids", async () => {
+        await expect(createProject({ name: "  " })).rejects.toThrow(/name/);
+        await expect(getProject("prj_missing")).rejects.toThrow(/not found/);
+    });
+
+    it("counts grouped rows and unfiles them on delete", async () => {
+        const p = await createProject({ name: "Job hunt" });
+        const s = await createSession({ title: "resume chat", projectId: p.id });
+        await createBookmark({
+            title: "Greenhouse",
+            url: "https://greenhouse.io",
+            projectId: p.id,
+        });
         await getDb().execute(
-            `INSERT INTO agents (id, name, description, instructions, created_at, updated_at)
-             VALUES ('agt_x', 'Writer', 'writes things', 'You write.', 1, 1)`,
+            "INSERT INTO documents (id, title, mime_type, folder, content_text, created_at, project_id) VALUES ('doc_1', 'Resume', 'application/pdf', '/projects/job-hunt', 'text', 0, ?)",
+            [p.id],
         );
-        const rows = await getDb().select<{
-            tools_json: string;
-            max_steps: number;
-            is_builtin: number;
-        }>("SELECT tools_json, max_steps, is_builtin FROM agents WHERE id = 'agt_x'");
-        expect(rows[0]).toEqual({ tools_json: "[]", max_steps: 6, is_builtin: 0 });
-    });
-});
 
-describe("agent naming helpers", () => {
-    it("slugifies display names", () => {
-        expect(agentSlug("Knowledge")).toBe("knowledge");
-        expect(agentSlug("HN Digest v2")).toBe("hn_digest_v2");
-    });
+        expect(await projectCounts(p.id)).toEqual({
+            sessions: 1,
+            documents: 1,
+            bookmarks: 1,
+            automations: 0,
+        });
 
-    it("throws on names that slug to nothing", () => {
-        expect(() => agentSlug("!!!")).toThrow(/empty slug/);
-    });
-
-    it("builds delegation tool names", () => {
-        const def = { name: "Research" } as AgentDef;
-        expect(delegationToolName(def)).toBe("ask_research_agent");
+        await deleteProject(p.id);
+        expect(await listProjects()).toEqual([]);
+        // Grouped rows survive, unfiled.
+        expect((await getSession(s.id)).project_id).toBeNull();
+        expect((await listBookmarks())[0]!.project_id).toBeNull();
+        expect(await listSessions()).toHaveLength(1);
     });
 });
 ```
 
-- [ ] **Step 2: Run it to make sure it fails**
+(This test also drives the Task 5 signatures `createSession({projectId})` / `createBookmark({projectId})` — implement the minimal column pass-through here, full filters in Task 5.)
 
-Run: `npx vitest run src/db/repo/agents.test.ts`
-Expected: FAIL — `no such table: agents` and `agentSlug` not exported.
+- [ ] **Step 2: Run to verify it fails**
 
-- [ ] **Step 3: Write the migration**
+Run: `npx vitest run src/db/repo/projects.test.ts`
+Expected: FAIL — module `./projects` does not exist.
+
+- [ ] **Step 3: Create the migration + register it**
+
+Create `src-tauri/migrations/0011_projects.sql`:
 
 ```sql
--- src-tauri/migrations/0003_agents.sql
--- User-defined agents. Builtin rows (knowledge, research) are seeded from TS
--- at bootstrap (like presets) so instructions live in one place.
+-- Projects group chats, files (documents), bookmarks, and automations.
+-- Also: per-chat custom color, snippet groups for category filtering.
 
-CREATE TABLE agents (
+CREATE TABLE projects (
     id TEXT PRIMARY KEY,
-    name TEXT NOT NULL UNIQUE,
-    description TEXT NOT NULL,
-    instructions TEXT NOT NULL,
-    tools_json TEXT NOT NULL DEFAULT '[]',
-    model TEXT,
-    max_steps INTEGER NOT NULL DEFAULT 6,
+    name TEXT NOT NULL,
+    description TEXT,
     color TEXT,
-    is_builtin INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
 );
 
--- Presets stored agent enum names; they now store agent row ids.
-UPDATE presets SET enabled_agents_json =
-    REPLACE(REPLACE(enabled_agents_json, '"knowledge"', '"agt_knowledge"'),
-            '"research"', '"agt_research"');
+ALTER TABLE chat_sessions ADD COLUMN project_id TEXT REFERENCES projects(id);
+ALTER TABLE chat_sessions ADD COLUMN color TEXT;
+ALTER TABLE documents ADD COLUMN project_id TEXT REFERENCES projects(id);
+ALTER TABLE bookmarks ADD COLUMN project_id TEXT REFERENCES projects(id);
+ALTER TABLE automations ADD COLUMN project_id TEXT REFERENCES projects(id);
+ALTER TABLE snippets ADD COLUMN group_name TEXT NOT NULL DEFAULT 'General';
 ```
 
-- [ ] **Step 4: Register the migration in Rust**
-
-In `src-tauri/src/lib.rs`, append to the `migrations()` vec after version 2:
+Append to `src-tauri/src/lib.rs`:
 
 ```rust
-Migration {
-    version: 3,
-    description: "agents table + preset agent ids",
-    sql: include_str!("../migrations/0003_agents.sql"),
-    kind: MigrationKind::Up,
-},
+        Migration {
+            version: 11,
+            description: "projects + project_id/color/group columns",
+            sql: include_str!("../migrations/0011_projects.sql"),
+            kind: MigrationKind::Up,
+        },
 ```
 
-- [ ] **Step 5: Add the schema + helpers to `src/lib/schemas.ts`**
+- [ ] **Step 4: Mirror in schemas.ts**
 
-Append after the preset section (do **not** touch `agentNameSchema` yet — Task 6 removes it):
+Add after `snippetSchema` (end of file):
 
 ```ts
-export const agentDefSchema = z.object({
+export const projectSchema = z.object({
     id: z.string(),
     name: z.string(),
-    description: z.string(),
-    instructions: z.string(),
-    tools_json: z.string(),
-    model: z.string().nullable(),
-    max_steps: z.number(),
+    description: z.string().nullable(),
     color: z.string().nullable(),
-    is_builtin: sqlBool,
     created_at: z.number(),
     updated_at: z.number(),
 });
-export type AgentDef = z.infer<typeof agentDefSchema>;
-
-/** Tool names (from the tool catalog) this agent may use. */
-export function agentToolNames(def: AgentDef): string[] {
-    return z.array(z.string()).parse(JSON.parse(def.tools_json));
-}
-
-/** "HN Digest v2" -> "hn_digest_v2" — used for tool names, usage rows, colors. */
-export function agentSlug(name: string): string {
-    const slug = name
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, "_")
-        .replace(/^_+|_+$/g, "");
-    if (!slug) throw new Error(`agent name produces an empty slug: ${name}`);
-    return slug;
-}
-
-/** The orchestrator-facing delegation tool name for an agent. */
-export function delegationToolName(def: AgentDef): string {
-    return `ask_${agentSlug(def.name)}_agent`;
-}
+export type Project = z.infer<typeof projectSchema>;
 ```
 
-- [ ] **Step 6: Run the tests and typecheck**
+And add the new columns to existing schemas:
+- `chatSessionSchema`: `project_id: z.string().nullable(),` and `color: z.string().nullable(),` (after `permission_level_id`)
+- `documentSchema`, `bookmarkSchema`, `automationSchema`: `project_id: z.string().nullable(),`
+- `snippetSchema`: `group_name: z.string(),`
 
-Run: `npx vitest run src/db/repo/agents.test.ts` — Expected: PASS.
-Run: `npm run typecheck` — Expected: clean.
+- [ ] **Step 5: Write the repo**
 
-- [ ] **Step 7: Commit**
-
-```bash
-git add src-tauri/migrations/0003_agents.sql src-tauri/src/lib.rs src/lib/schemas.ts src/db/repo/agents.test.ts
-git commit -m "feat: agents table migration + AgentDef schema"
-```
-
-### Task 2: agents repository (CRUD + builtin seeds)
-
-**Files:**
-- Create: `src/db/repo/agents.ts`
-- Modify: `src/app/bootstrap.ts`
-- Test: `src/db/repo/agents.test.ts` (extend)
-
-**Interfaces:**
-- Consumes: `agentDefSchema`, `AgentDef` from Task 1.
-- Produces: `AgentInput { name; description; instructions; tools: string[]; model?: string|null; maxSteps?: number; color?: string|null }`; `BUILTIN_AGENT_IDS = { knowledge: "agt_knowledge", research: "agt_research" }`; `seedBuiltinAgents()`, `createAgent(input)`, `updateAgent(id, input)`, `deleteAgent(id)` (throws for builtins), `duplicateAgent(id)`, `getAgent(id)`, `listAgents()`. All later tasks load agents through these.
-
-- [ ] **Step 1: Write the failing tests (append to `src/db/repo/agents.test.ts`)**
-
-```ts
-import {
-    createAgent,
-    deleteAgent,
-    duplicateAgent,
-    getAgent,
-    listAgents,
-    seedBuiltinAgents,
-    updateAgent,
-    BUILTIN_AGENT_IDS,
-} from "./agents";
-import { agentToolNames } from "@/lib/schemas";
-
-describe("agents repo", () => {
-    it("seeds builtin knowledge and research agents idempotently", async () => {
-        await seedBuiltinAgents();
-        await seedBuiltinAgents(); // must not throw or duplicate
-        const agents = await listAgents();
-        expect(agents.map((a) => a.id).sort()).toEqual([
-            BUILTIN_AGENT_IDS.knowledge,
-            BUILTIN_AGENT_IDS.research,
-        ]);
-        const knowledge = await getAgent(BUILTIN_AGENT_IDS.knowledge);
-        expect(knowledge.is_builtin).toBe(1);
-        expect(agentToolNames(knowledge)).toContain("search_documents");
-    });
-
-    it("creates, updates, and deletes a custom agent", async () => {
-        const created = await createAgent({
-            name: "Writer",
-            description: "Drafts notes",
-            instructions: "You write concise notes.",
-            tools: ["write_note"],
-        });
-        expect(created.max_steps).toBe(6);
-
-        const updated = await updateAgent(created.id, {
-            name: "Writer",
-            description: "Drafts notes",
-            instructions: "You write very concise notes.",
-            tools: ["write_note", "search_notes"],
-            maxSteps: 4,
-        });
-        expect(updated.max_steps).toBe(4);
-        expect(agentToolNames(updated)).toEqual(["write_note", "search_notes"]);
-
-        await deleteAgent(created.id);
-        await expect(getAgent(created.id)).rejects.toThrow(/not found/);
-    });
-
-    it("refuses to delete builtin agents but allows editing them", async () => {
-        await seedBuiltinAgents();
-        await expect(
-            deleteAgent(BUILTIN_AGENT_IDS.knowledge),
-        ).rejects.toThrow(/built-in/);
-        const edited = await updateAgent(BUILTIN_AGENT_IDS.knowledge, {
-            name: "Knowledge",
-            description: "custom desc",
-            instructions: "custom instructions",
-            tools: ["search_documents"],
-        });
-        expect(edited.description).toBe("custom desc");
-        expect(edited.is_builtin).toBe(1);
-    });
-
-    it("duplicates an agent with a distinct name", async () => {
-        await seedBuiltinAgents();
-        const copy = await duplicateAgent(BUILTIN_AGENT_IDS.research);
-        expect(copy.name).toBe("Research copy");
-        expect(copy.is_builtin).toBe(0);
-        expect(copy.instructions).toBe(
-            (await getAgent(BUILTIN_AGENT_IDS.research)).instructions,
-        );
-    });
-});
-```
-
-- [ ] **Step 2: Run to verify failure**
-
-Run: `npx vitest run src/db/repo/agents.test.ts`
-Expected: FAIL — module `./agents` not found.
-
-- [ ] **Step 3: Implement `src/db/repo/agents.ts`**
+Create `src/db/repo/projects.ts`:
 
 ```ts
 import { getDb } from "../client";
 import { newId, now } from "@/lib/ids";
-import { agentDefSchema, type AgentDef } from "@/lib/schemas";
+import { projectSchema, type Project } from "@/lib/schemas";
 
-export interface AgentInput {
+export async function createProject(input: {
     name: string;
-    description: string;
-    instructions: string;
-    tools: string[];
-    model?: string | null;
-    maxSteps?: number;
+    description?: string | null;
     color?: string | null;
-}
-
-export const BUILTIN_AGENT_IDS = {
-    knowledge: "agt_knowledge",
-    research: "agt_research",
-} as const;
-
-const KNOWLEDGE_INSTRUCTIONS = `You are the knowledge agent: you answer questions from the user's stored documents and notes.
-Search first (search_documents / search_notes), read what looks relevant (read_document / read_note),
-then answer grounded in what you found. Name the sources you used. If a tool result reports
-{denied: true}, the user refused access — say what you could not check and answer from
-what you have. If nothing relevant exists, say so plainly.`;
-
-const RESEARCH_INSTRUCTIONS = `You are the research agent: you read specific web pages with fetch_url and report
-what they say. Only fetch URLs that were given to you or that appear in pages you
-already fetched. Quote or closely paraphrase sources and name the URL for each claim.
-If a tool result reports {denied: true}, the user refused that fetch — do not retry
-the same domain; report what you could not access.`;
-
-/** Idempotent — called from bootstrap() on every start, like preset seeds. */
-export async function seedBuiltinAgents(): Promise<void> {
-    const seeds: Array<{ id: string } & AgentInput> = [
-        {
-            id: BUILTIN_AGENT_IDS.knowledge,
-            name: "Knowledge",
-            description:
-                "Searches and reads the user's stored documents and notes. Use for anything that could be answered from the user's own material.",
-            instructions: KNOWLEDGE_INSTRUCTIONS,
-            tools: [
-                "search_documents",
-                "read_document",
-                "list_documents",
-                "search_notes",
-                "read_note",
-                "list_notes",
-            ],
-        },
-        {
-            id: BUILTIN_AGENT_IDS.research,
-            name: "Research",
-            description:
-                "Reads specific web pages. Use when the user provides URLs or asks about the content of a particular site.",
-            instructions: RESEARCH_INSTRUCTIONS,
-            tools: ["fetch_url"],
-        },
-    ];
-    const t = now();
-    for (const s of seeds) {
-        await getDb().execute(
-            `INSERT OR IGNORE INTO agents
-               (id, name, description, instructions, tools_json, model,
-                max_steps, color, is_builtin, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, NULL, 6, NULL, 1, ?, ?)`,
-            [s.id, s.name, s.description, s.instructions, JSON.stringify(s.tools), t, t],
-        );
-    }
-}
-
-export async function createAgent(input: AgentInput): Promise<AgentDef> {
-    const id = newId("agt");
+}): Promise<Project> {
+    const name = input.name.trim();
+    if (!name) throw new Error("project needs a name");
+    const id = newId("prj");
     const t = now();
     await getDb().execute(
-        `INSERT INTO agents
-           (id, name, description, instructions, tools_json, model,
-            max_steps, color, is_builtin, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
-        [
-            id,
-            input.name,
-            input.description,
-            input.instructions,
-            JSON.stringify(input.tools),
-            input.model ?? null,
-            input.maxSteps ?? 6,
-            input.color ?? null,
-            t,
-            t,
-        ],
+        `INSERT INTO projects (id, name, description, color, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [id, name, input.description ?? null, input.color ?? null, t, t],
     );
-    return getAgent(id);
+    return getProject(id);
 }
 
-export async function updateAgent(
+export async function getProject(id: string): Promise<Project> {
+    const rows = await getDb().select("SELECT * FROM projects WHERE id = ?", [id]);
+    if (!rows[0]) throw new Error(`project not found: ${id}`);
+    return projectSchema.parse(rows[0]);
+}
+
+export async function listProjects(): Promise<Project[]> {
+    const rows = await getDb().select(
+        "SELECT * FROM projects ORDER BY updated_at DESC",
+    );
+    return rows.map((r) => projectSchema.parse(r));
+}
+
+export async function updateProject(
     id: string,
-    input: AgentInput,
-): Promise<AgentDef> {
-    const res = await getDb().execute(
-        `UPDATE agents SET
-           name = ?, description = ?, instructions = ?, tools_json = ?,
-           model = ?, max_steps = ?, color = ?, updated_at = ?
-         WHERE id = ?`,
+    input: { name?: string; description?: string | null; color?: string | null },
+): Promise<Project> {
+    const cur = await getProject(id);
+    await getDb().execute(
+        "UPDATE projects SET name = ?, description = ?, color = ?, updated_at = ? WHERE id = ?",
         [
-            input.name,
-            input.description,
-            input.instructions,
-            JSON.stringify(input.tools),
-            input.model ?? null,
-            input.maxSteps ?? 6,
-            input.color ?? null,
+            input.name?.trim() || cur.name,
+            input.description === undefined ? cur.description : input.description,
+            input.color === undefined ? cur.color : input.color,
             now(),
             id,
         ],
     );
-    if (res.rowsAffected === 0) throw new Error(`agent not found: ${id}`);
-    return getAgent(id);
+    return getProject(id);
 }
 
-export async function getAgent(id: string): Promise<AgentDef> {
-    const rows = await getDb().select("SELECT * FROM agents WHERE id = ?", [id]);
-    if (!rows[0]) throw new Error(`agent not found: ${id}`);
-    return agentDefSchema.parse(rows[0]);
+/**
+ * Unfiles everything the project grouped, then removes it. Explicit UPDATEs
+ * (not FK cascades) so tauri, wasm, and better-sqlite3 clients behave the same.
+ */
+export async function deleteProject(id: string): Promise<void> {
+    const db = getDb();
+    for (const table of ["chat_sessions", "documents", "bookmarks", "automations"]) {
+        await db.execute(
+            `UPDATE ${table} SET project_id = NULL WHERE project_id = ?`,
+            [id],
+        );
+    }
+    await db.execute("DELETE FROM projects WHERE id = ?", [id]);
 }
 
-export async function listAgents(): Promise<AgentDef[]> {
-    const rows = await getDb().select(
-        "SELECT * FROM agents ORDER BY is_builtin DESC, created_at ASC",
+export interface ProjectCounts {
+    sessions: number;
+    documents: number;
+    bookmarks: number;
+    automations: number;
+}
+
+export async function projectCounts(id: string): Promise<ProjectCounts> {
+    const rows = await getDb().select<ProjectCounts>(
+        `SELECT
+            (SELECT COUNT(*) FROM chat_sessions WHERE project_id = ?) AS sessions,
+            (SELECT COUNT(*) FROM documents WHERE project_id = ?) AS documents,
+            (SELECT COUNT(*) FROM bookmarks WHERE project_id = ?) AS bookmarks,
+            (SELECT COUNT(*) FROM automations WHERE project_id = ?) AS automations`,
+        [id, id, id, id],
     );
-    return rows.map((r) => agentDefSchema.parse(r));
-}
-
-export async function deleteAgent(id: string): Promise<void> {
-    const agent = await getAgent(id);
-    if (agent.is_builtin) throw new Error("built-in agents cannot be deleted");
-    await getDb().execute("DELETE FROM agents WHERE id = ?", [id]);
-}
-
-export async function duplicateAgent(id: string): Promise<AgentDef> {
-    const src = await getAgent(id);
-    return createAgent({
-        name: `${src.name} copy`,
-        description: src.description,
-        instructions: src.instructions,
-        tools: JSON.parse(src.tools_json) as string[],
-        model: src.model,
-        maxSteps: src.max_steps,
-        color: src.color,
-    });
+    if (!rows[0]) throw new Error(`counts query returned no row for ${id}`);
+    return rows[0];
 }
 ```
 
-- [ ] **Step 4: Seed at bootstrap**
+Minimal pass-throughs the test needs (full versions in Task 5):
+- `src/db/repo/sessions.ts` `createSession` opts gain `projectId?: string | null`; the INSERT becomes `INSERT INTO chat_sessions (id, title, preset_id, permission_level_id, project_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)` with `opts.projectId ?? null` as the fifth param.
+- `src/db/repo/library.ts` `createBookmark` input gains `projectId?: string | null`; INSERT becomes `INSERT INTO bookmarks (id, title, url, group_name, project_id, created_at) VALUES (?, ?, ?, ?, ?, ?)` with `input.projectId ?? null`.
 
-In `src/app/bootstrap.ts`: add `import { seedBuiltinAgents } from "@/db/repo/agents";` and in `runBootstrap()` insert `await seedBuiltinAgents();` on the line before `await seedBuiltinPresets({`.
+- [ ] **Step 6: Run tests**
 
-- [ ] **Step 5: Run tests and typecheck**
+Run: `npm test`
+Expected: PASS — new suite green, all existing suites still green (schema additions are non-breaking; `z.object` tolerates the new columns everywhere else).
 
-Run: `npx vitest run src/db/repo/agents.test.ts` — Expected: PASS.
-Run: `npm run typecheck` — Expected: clean.
-
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add src/db/repo/agents.ts src/db/repo/agents.test.ts src/app/bootstrap.ts
-git commit -m "feat: agents repo with builtin seeds"
+git add src-tauri/migrations/0011_projects.sql src-tauri/src/lib.rs \
+  src/lib/schemas.ts src/db/repo/projects.ts src/db/repo/projects.test.ts \
+  src/db/repo/sessions.ts src/db/repo/library.ts
+git commit -m "feat: projects table + project/color/group columns + projects repo"
 ```
 
-### Task 3: `write_note` tool
+---
+
+### Task 5: Repo extensions (sessions, library, documents, automations)
 
 **Files:**
-- Modify: `src/ai/tools/notes.ts`
-- Test: `src/ai/tools/tools.test.ts` (append a describe block)
+- Modify: `src/db/repo/sessions.ts`, `src/db/repo/library.ts`, `src/db/repo/documents.ts:5-32`, `src/db/repo/automations.ts`
+- Test: `src/db/repo/library.test.ts`, `src/db/repo/projects.test.ts` (extend)
 
 **Interfaces:**
-- Consumes: `createNote` from `@/db/repo/notes`; `PermissionContext.gated`.
-- Produces: tool `write_note` inside `createNoteTools(...)` with input `{ title: string; folder?: string; body_md: string }`, resolving scope `{ access: "write", scopeType: "doc_folder", scopeValue: <normalized folder> }`; returns `{ id, title, folder }`. Registered in `noteScopeResolvers` (flows into `scopeResolvers` via the existing spread in `src/ai/tools/index.ts` — no change needed there).
+- Produces (exact signatures later tasks call):
+  - `sessions`: `setSessionColor(id: string, color: string | null): Promise<void>`, `setSessionProject(id: string, projectId: string | null): Promise<void>`, `listSessions(filter?: { projectId?: string }): Promise<ChatSession[]>` (no filter → all sessions; `projectId` → only that project's)
+  - `library`: `listBookmarks(filter?: { projectId?: string | null }): Promise<Bookmark[]>` (`null` → unfiled only; `string` → that project; omitted → all), `updateBookmark(id: string, input: { title: string; url: string; groupName: string; projectId: string | null }): Promise<void>`, `createSnippet({ title, body, groupName? })`, `updateSnippet(id, { title, body, groupName })`
+  - `documents`: `insertDocument` opts gain `projectId?: string | null`; new `listProjectDocuments(projectId: string): Promise<Document[]>` (metadata only, `'' AS content_text` like `listDocuments`)
+  - `automations`: `listAutomations` gains optional `{ projectId?: string }` filter; `createAutomation`/update accept `projectId?: string | null` (follow the file's existing input shape)
 
-- [ ] **Step 1: Write the failing test (append to `src/ai/tools/tools.test.ts`)**
+- [ ] **Step 1: Write the failing tests**
 
-Follow the existing test file's setup pattern (test DB via `createTestDbClient` + `setDb`, a `PermissionContext` with grants). Add:
+Extend `src/db/repo/library.test.ts` with:
 
 ```ts
-describe("write_note tool", () => {
-    it("creates a note when a write grant covers the folder", async () => {
-        const permissions = new PermissionContext();
-        permissions.levelGrants = [
-            {
-                tool: "write_note",
-                access: "write",
-                scopeType: "doc_folder",
-                scopeValue: "/automations",
-            },
-        ];
-        const tools = createNoteTools(permissions);
-        const result = (await tools.write_note.execute!(
-            { title: "Digest", folder: "/automations", body_md: "# hi" },
-            { toolCallId: "t1", messages: [] },
-        )) as { id: string; title: string; folder: string };
-        expect(result.title).toBe("Digest");
-        const note = await getNote(result.id);
-        expect(note.body_md).toBe("# hi");
-        expect(note.folder).toBe("/automations");
-    });
-
-    it("asks (and honors deny) outside the granted folder", async () => {
-        const permissions = new PermissionContext();
-        permissions.broker.subscribe((pending) => {
-            for (const req of pending) permissions.broker.respond(req.id, "deny");
+    it("filters bookmarks by project and edits in place", async () => {
+        const kept = await createBookmark({
+            title: "Docs",
+            url: "https://a.dev",
         });
-        const tools = createNoteTools(permissions);
-        const result = (await tools.write_note.execute!(
-            { title: "X", folder: "/personal", body_md: "no" },
-            { toolCallId: "t2", messages: [] },
-        )) as { denied?: boolean };
-        expect(result.denied).toBe(true);
-    });
-});
-```
-
-Add the imports the block needs at the top of the file if not present: `createNoteTools` from `./notes`, `getNote` from `@/db/repo/notes`, `PermissionContext` from `./context`.
-
-> Note: match the `execute!` second-argument shape used by the existing tool tests in this file — copy whatever option object they pass; the AI SDK's `ToolCallOptions` there is the source of truth.
-
-- [ ] **Step 2: Run to verify failure**
-
-Run: `npx vitest run src/ai/tools/tools.test.ts`
-Expected: FAIL — `write_note` is not defined.
-
-- [ ] **Step 3: Implement in `src/ai/tools/notes.ts`**
-
-Add to the imports: `import { createNote } from "@/db/repo/notes";` (extend the existing repo import). Add the input schema next to the others:
-
-```ts
-const writeInput = z.object({
-    title: z.string().describe("Title for the new note"),
-    folder: z
-        .string()
-        .optional()
-        .describe("Folder to file the note under, e.g. /automations. Defaults to /."),
-    body_md: z.string().describe("Markdown body of the note"),
-});
-```
-
-Add to `noteScopeResolvers`:
-
-```ts
-write_note: (input) => ({
-    access: "write",
-    scopeType: "doc_folder",
-    scopeValue: normalizeFolder(
-        (input as z.infer<typeof writeInput>).folder ?? "/",
-    ),
-}),
-```
-
-Add to the object returned by `createNoteTools`:
-
-```ts
-write_note: tool({
-    description:
-        "Create a new markdown note in the user's notes. Use to save summaries, drafts, or results the user should keep.",
-    inputSchema: writeInput,
-    execute: permissions.gated(
-        "write_note",
-        noteScopeResolvers.write_note!,
-        async (input: z.infer<typeof writeInput>) => {
-            const note = await createNote({
-                title: input.title,
-                folder: input.folder,
-                bodyMd: input.body_md,
-            });
-            return { id: note.id, title: note.title, folder: note.folder };
-        },
-    ),
-}),
-```
-
-- [ ] **Step 4: Run tests and typecheck**
-
-Run: `npx vitest run src/ai/tools/tools.test.ts` — Expected: PASS.
-Run: `npm test && npm run typecheck` — Expected: clean (permission-engine tests still green — `write` access + `doc_folder` scope are already modeled).
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/ai/tools/notes.ts src/ai/tools/tools.test.ts
-git commit -m "feat: write_note tool (write-gated by folder)"
-```
-### Task 4: tool catalog + `buildToolSet()`
-
-**Files:**
-- Create: `src/ai/tools/catalog.ts`
-- Test: `src/ai/tools/catalog.test.ts`
-
-**Interfaces:**
-- Consumes: `createDocumentTools`, `createNoteTools`, `createWebTools`, `PermissionContext`.
-- Produces: `ToolCatalogEntry { name; label; access: "read"|"write"; group: "documents"|"notes"|"web" }`; `TOOL_CATALOG: ToolCatalogEntry[]`; `buildToolSet(names: string[], deps: { permissions: PermissionContext; fetch: typeof globalThis.fetch }): ToolSet`. The agent factory (Task 5) and AgentEditor UI (Task 7) consume these.
-
-- [ ] **Step 1: Write the failing test**
-
-```ts
-// src/ai/tools/catalog.test.ts
-import { describe, expect, it } from "vitest";
-import { PermissionContext } from "./context";
-import { buildToolSet, TOOL_CATALOG } from "./catalog";
-
-const deps = {
-    permissions: new PermissionContext(),
-    fetch: (async () => new Response("stub")) as typeof globalThis.fetch,
-};
-
-describe("tool catalog", () => {
-    it("every catalog entry builds a real tool", () => {
-        const all = buildToolSet(
-            TOOL_CATALOG.map((e) => e.name),
-            deps,
-        );
-        expect(Object.keys(all).sort()).toEqual(
-            TOOL_CATALOG.map((e) => e.name).sort(),
-        );
+        await updateBookmark(kept.id, {
+            title: "API Docs",
+            url: "https://a.dev/api",
+            groupName: "Reference",
+            projectId: null,
+        });
+        const all = await listBookmarks();
+        expect(all[0]!.title).toBe("API Docs");
+        expect(all[0]!.group_name).toBe("Reference");
     });
 
-    it("builds only the requested subset", () => {
-        const set = buildToolSet(["fetch_url", "write_note"], deps);
-        expect(Object.keys(set).sort()).toEqual(["fetch_url", "write_note"]);
+    it("snippets carry groups", async () => {
+        const s = await createSnippet({
+            title: "greeting",
+            body: "hello",
+            groupName: "Email",
+        });
+        expect(s.group_name).toBe("Email");
+        await updateSnippet(s.id, { title: "greeting", body: "hi", groupName: "Chat" });
+        expect((await listSnippets())[0]!.group_name).toBe("Chat");
     });
-
-    it("throws on unknown tool names", () => {
-        expect(() => buildToolSet(["run_shell"], deps)).toThrow(
-            /unknown tool.*run_shell/,
-        );
-    });
-});
 ```
 
-- [ ] **Step 2: Run to verify failure**
-
-Run: `npx vitest run src/ai/tools/catalog.test.ts`
-Expected: FAIL — module `./catalog` not found.
-
-- [ ] **Step 3: Implement `src/ai/tools/catalog.ts`**
+Extend `src/db/repo/projects.test.ts` with:
 
 ```ts
-import type { ToolSet } from "ai";
-import { createDocumentTools } from "./documents";
-import { createNoteTools } from "./notes";
-import { createWebTools } from "./web";
-import type { PermissionContext } from "./context";
+    it("filters sessions by project and recolors them", async () => {
+        const p = await createProject({ name: "P" });
+        const inProj = await createSession({ title: "a", projectId: p.id });
+        await createSession({ title: "b" });
 
-/**
- * Every gated tool an agent can be granted, with UI metadata. Adding a tool
- * module = spread its factory into buildToolSet and list its entries here.
- */
-export interface ToolCatalogEntry {
-    name: string;
-    label: string;
-    access: "read" | "write";
-    group: "documents" | "notes" | "web";
-}
-
-export const TOOL_CATALOG: ToolCatalogEntry[] = [
-    { name: "search_documents", label: "Search documents", access: "read", group: "documents" },
-    { name: "read_document", label: "Read a document", access: "read", group: "documents" },
-    { name: "list_documents", label: "List documents", access: "read", group: "documents" },
-    { name: "search_notes", label: "Search notes", access: "read", group: "notes" },
-    { name: "read_note", label: "Read a note", access: "read", group: "notes" },
-    { name: "list_notes", label: "List notes", access: "read", group: "notes" },
-    { name: "write_note", label: "Create a note", access: "write", group: "notes" },
-    { name: "fetch_url", label: "Fetch a web page", access: "read", group: "web" },
-];
-
-/** Builds the ToolSet for an agent's granted tool names. Throws on unknowns. */
-export function buildToolSet(
-    names: string[],
-    deps: {
-        permissions: PermissionContext;
-        fetch: typeof globalThis.fetch;
-    },
-): ToolSet {
-    const all: ToolSet = {
-        ...createDocumentTools(deps.permissions),
-        ...createNoteTools(deps.permissions),
-        ...createWebTools(deps.permissions, deps.fetch),
-    };
-    const set: ToolSet = {};
-    for (const name of names) {
-        const t = all[name];
-        if (!t) throw new Error(`unknown tool in agent definition: ${name}`);
-        set[name] = t;
-    }
-    return set;
-}
-```
-
-- [ ] **Step 4: Run tests and typecheck**
-
-Run: `npx vitest run src/ai/tools/catalog.test.ts` — Expected: PASS.
-Run: `npm run typecheck` — Expected: clean.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/ai/tools/catalog.ts src/ai/tools/catalog.test.ts
-git commit -m "feat: tool catalog + buildToolSet for per-agent tool subsets"
-```
-
-### Task 5: agent factory (`createAgentFromDef`)
-
-**Files:**
-- Create: `src/ai/agents/factory.ts`
-- Modify: `src/ai/agents/types.ts`
-- Test: `src/ai/agents/factory.test.ts`
-
-**Interfaces:**
-- Consumes: `AgentDef`, `agentToolNames` (Task 1); `buildToolSet` (Task 4).
-- Produces: `createAgentFromDef(def, runtime): { agent: ToolLoopAgent; modelId: string }`; `AgentRuntime` gains `resolveModel: (modelId: string) => LanguageModel` and `AgentUsageEvent.agent` widens to `string`. Orchestrator (Task 6) and pipeline runner (Task 11) consume the factory.
-
-- [ ] **Step 1: Update `src/ai/agents/types.ts`**
-
-Replace the file's contents with:
-
-```ts
-import type { LanguageModel, LanguageModelUsage } from "ai";
-import type { PermissionContext } from "@/ai/tools/context";
-
-/** Reported after every agent run so callers can persist token usage. */
-export interface AgentUsageEvent {
-    /** "orchestrator" or an agent slug (agentSlug of its name). */
-    agent: string;
-    model: string;
-    usage: LanguageModelUsage;
-}
-
-/** Everything agents need at construction time; built per session from a preset. */
-export interface AgentRuntime {
-    permissions: PermissionContext;
-    /** Preset's main model — default for specialists. */
-    mainModel: LanguageModel;
-    mainModelId: string;
-    /** Preset's router model — runs the orchestrator. Falls back to mainModel. */
-    routerModel: LanguageModel;
-    routerModelId: string;
-    /** Builds a model for a per-agent model override (same provider). */
-    resolveModel: (modelId: string) => LanguageModel;
-    /** Injected fetch (plugin-http in the app, mocks in tests). */
-    fetch: typeof globalThis.fetch;
-    onUsage?: (event: AgentUsageEvent) => void;
-}
-```
-
-(This compiles today: `AgentName` was only used in the `agent:` union, now `string`. Call sites constructing `AgentRuntime` gain `resolveModel` in Steps 2–3 and Task 6.)
-
-- [ ] **Step 2: Write the failing test**
-
-```ts
-// src/ai/agents/factory.test.ts
-import { describe, expect, it } from "vitest";
-import { MockLanguageModelV3 } from "ai/test";
-import { PermissionContext } from "@/ai/tools/context";
-import type { AgentDef } from "@/lib/schemas";
-import type { AgentRuntime } from "./types";
-import { createAgentFromDef } from "./factory";
-
-function def(overrides: Partial<AgentDef>): AgentDef {
-    return {
-        id: "agt_t",
-        name: "Tester",
-        description: "d",
-        instructions: "You test.",
-        tools_json: "[]",
-        model: null,
-        max_steps: 6,
-        color: null,
-        is_builtin: 0,
-        created_at: 0,
-        updated_at: 0,
-        ...overrides,
-    };
-}
-
-function runtime(): AgentRuntime {
-    return {
-        permissions: new PermissionContext(),
-        mainModel: new MockLanguageModelV3({ modelId: "mock-main" }),
-        mainModelId: "mock-main",
-        routerModel: new MockLanguageModelV3({ modelId: "mock-router" }),
-        routerModelId: "mock-router",
-        resolveModel: (modelId) => new MockLanguageModelV3({ modelId }),
-        fetch: async () => new Response("stub"),
-    };
-}
-
-describe("createAgentFromDef", () => {
-    it("builds an agent on the main model with the selected tools", () => {
-        const { agent, modelId } = createAgentFromDef(
-            def({ tools_json: '["fetch_url","write_note"]' }),
-            runtime(),
-        );
-        expect(modelId).toBe("mock-main");
-        expect(Object.keys(agent.tools).sort()).toEqual([
-            "fetch_url",
-            "write_note",
+        expect((await listSessions({ projectId: p.id })).map((s) => s.id)).toEqual([
+            inProj.id,
         ]);
-    });
+        expect(await listSessions()).toHaveLength(2);
 
-    it("honors the per-agent model override", () => {
-        const { modelId } = createAgentFromDef(
-            def({ model: "cheap-model" }),
-            runtime(),
-        );
-        expect(modelId).toBe("cheap-model");
+        await setSessionColor(inProj.id, "#f472b6");
+        expect((await getSession(inProj.id)).color).toBe("#f472b6");
+        await setSessionProject(inProj.id, null);
+        expect(await listSessions({ projectId: p.id })).toEqual([]);
     });
-
-    it("throws on unknown tool names in the definition", () => {
-        expect(() =>
-            createAgentFromDef(def({ tools_json: '["nope"]' }), runtime()),
-        ).toThrow(/unknown tool/);
-    });
-});
 ```
 
-- [ ] **Step 3: Run to verify failure**
-
-Run: `npx vitest run src/ai/agents/factory.test.ts`
-Expected: FAIL — module `./factory` not found.
-
-- [ ] **Step 4: Implement `src/ai/agents/factory.ts`**
-
-```ts
-import { ToolLoopAgent, stepCountIs } from "ai";
-import { buildToolSet } from "@/ai/tools/catalog";
-import { agentToolNames, type AgentDef } from "@/lib/schemas";
-import type { AgentRuntime } from "./types";
-
-/**
- * Instantiates a runnable specialist from its DB definition: instructions as
- * the system prompt, catalog tool subset, and the preset main model unless the
- * definition overrides it.
- */
-export function createAgentFromDef(def: AgentDef, runtime: AgentRuntime) {
-    const model = def.model
-        ? runtime.resolveModel(def.model)
-        : runtime.mainModel;
-    const agent = new ToolLoopAgent({
-        model,
-        instructions: def.instructions,
-        tools: buildToolSet(agentToolNames(def), {
-            permissions: runtime.permissions,
-            fetch: runtime.fetch,
-        }),
-        stopWhen: stepCountIs(def.max_steps),
-    });
-    return { agent, modelId: def.model ?? runtime.mainModelId };
-}
-```
-
-- [ ] **Step 5: Run tests and typecheck**
-
-Run: `npx vitest run src/ai/agents/factory.test.ts` — Expected: PASS.
-Run: `npm run typecheck` — Expected: **fails** in `agents.test.ts`/`runtime.ts` (missing `resolveModel`). Patch the two constructors now so the repo compiles:
-- `src/ai/agents/agents.test.ts` `makeRuntime`: add `resolveModel: (modelId) => new MockLanguageModelV3({ modelId }),`
-- `src/ai/agents/runtime.ts` `buildSessionAgent`: add to the `runtime` literal `resolveModel: (modelId) => createModel({ provider, modelId }, runtimeBase),`
-
-Re-run: `npm test && npm run typecheck` — Expected: clean.
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add src/ai/agents/factory.ts src/ai/agents/factory.test.ts src/ai/agents/types.ts src/ai/agents/runtime.ts src/ai/agents/agents.test.ts
-git commit -m "feat: agent factory building specialists from DB definitions"
-```
-
-### Task 6: dynamic orchestrator + agent-enum removal sweep
-
-This is one atomic interface change (agent enum → DB ids) that ripples; the repo compiles and all tests pass only when every edit lands together.
-
-**Files:**
-- Modify: `src/ai/agents/orchestrator.ts`, `src/ai/agents/runtime.ts`, `src/lib/schemas.ts`, `src/db/repo/presets.ts`, `src/app/chat/ChatPage.tsx`, `src/app/presets/PresetsPage.tsx`, `src/components/hud/networkData.ts`, `src/app/agents/AgentsPage.tsx`, `evals/router.eval.ts`
-- Create: `src/ai/providers/appFetch.ts`
-- Delete: `src/ai/agents/knowledge.ts`, `src/ai/agents/research.ts`, `src/components/hud/agentCatalog.ts`
-- Test: `src/ai/agents/agents.test.ts` (rewrite call sites)
-
-**Interfaces:**
-- Consumes: `createAgentFromDef` (Task 5), agents repo (Task 2), `delegationToolName`/`agentSlug` (Task 1).
-- Produces: `createOrchestrator(runtime, { systemPrompt: string; agents: AgentDef[] })`; `presetAgents(preset): string[]` (agent **ids**); `PresetInput.enabledAgents: string[]`; `buildSessionAgent` unchanged signature but loads defs from DB; `buildAgentTypeNetwork(agents: AgentDef[])` and `buildSessionNetwork(sessions, presets, agents)`; `appFetch` shared export.
-
-- [ ] **Step 1: Update the orchestrator tests first (`src/ai/agents/agents.test.ts`)**
-
-Keep the four existing test scenarios; change only construction. Add near the top:
-
-```ts
-import type { AgentDef } from "@/lib/schemas";
-
-function makeDef(overrides: Partial<AgentDef> & { name: string }): AgentDef {
-    return {
-        id: `agt_${overrides.name.toLowerCase()}`,
-        description: `${overrides.name} specialist`,
-        instructions: `You are the ${overrides.name} agent.`,
-        tools_json: "[]",
-        model: null,
-        max_steps: 6,
-        color: null,
-        is_builtin: 0,
-        created_at: 0,
-        updated_at: 0,
-        ...overrides,
-    };
-}
-
-const KNOWLEDGE_DEF = makeDef({
-    name: "Knowledge",
-    tools_json: '["search_documents","read_document","list_documents"]',
-});
-const RESEARCH_DEF = makeDef({ name: "Research", tools_json: '["fetch_url"]' });
-```
-
-Then replace every `createOrchestrator(runtime, { systemPrompt, enabledAgents: [...] })` call:
-- `enabledAgents: ["knowledge"]` → `agents: [KNOWLEDGE_DEF]`
-- `enabledAgents: []` → `agents: []`
-- `enabledAgents: ["knowledge", "research"]` → `agents: [KNOWLEDGE_DEF, RESEARCH_DEF]`
-
-The delegation tool names (`ask_knowledge_agent`, `ask_research_agent`) and usage expectations (`agent: "knowledge"`) stay identical — slugs preserve them.
+(Add the new imports at the top of each test file.)
 
 - [ ] **Step 2: Run to verify failure**
 
-Run: `npx vitest run src/ai/agents/agents.test.ts`
-Expected: FAIL — `createOrchestrator` still expects `enabledAgents`.
+Run: `npx vitest run src/db/repo/library.test.ts src/db/repo/projects.test.ts`
+Expected: FAIL — `updateBookmark`, `setSessionColor`, etc. don't exist.
 
-- [ ] **Step 3: Rewrite `src/ai/agents/orchestrator.ts`**
+- [ ] **Step 3: Implement**
+
+`src/db/repo/sessions.ts` — replace `listSessions` and append:
 
 ```ts
-import { ToolLoopAgent, stepCountIs, tool, type ToolSet } from "ai";
-import { z } from "zod";
-import {
-    agentSlug,
-    delegationToolName,
-    type AgentDef,
-} from "@/lib/schemas";
-import { createAgentFromDef } from "./factory";
-import type { AgentRuntime } from "./types";
+export async function listSessions(filter?: {
+    projectId?: string;
+}): Promise<ChatSession[]> {
+    const rows = filter?.projectId
+        ? await getDb().select(
+              "SELECT * FROM chat_sessions WHERE project_id = ? ORDER BY updated_at DESC",
+              [filter.projectId],
+          )
+        : await getDb().select(
+              "SELECT * FROM chat_sessions ORDER BY updated_at DESC",
+          );
+    return rows.map((r) => chatSessionSchema.parse(r));
+}
 
-const delegationInput = z.object({
-    task: z
-        .string()
-        .describe(
-            "The complete, self-contained task for the specialist, including any context it needs — it cannot see this conversation.",
-        ),
-});
+export async function setSessionColor(
+    id: string,
+    color: string | null,
+): Promise<void> {
+    await getDb().execute(
+        "UPDATE chat_sessions SET color = ?, updated_at = ? WHERE id = ?",
+        [color, now(), id],
+    );
+}
 
-const ROUTING_ADDENDUM = `
-Routing: answer directly when you can. Delegate to a specialist only when the task
-needs their capability. Delegations are self-contained — restate any needed context
-in the task. After a specialist reports back, compose the final answer yourself.`;
+export async function setSessionProject(
+    id: string,
+    projectId: string | null,
+): Promise<void> {
+    await getDb().execute(
+        "UPDATE chat_sessions SET project_id = ?, updated_at = ? WHERE id = ?",
+        [projectId, now(), id],
+    );
+}
+```
 
-/**
- * The orchestrator: runs on the cheap router model and sees each enabled
- * agent definition as one delegation tool. No agents = plain direct answers.
- */
-export function createOrchestrator(
-    runtime: AgentRuntime,
-    opts: { systemPrompt: string; agents: AgentDef[] },
-) {
-    const tools: ToolSet = {};
-    for (const def of opts.agents) {
-        tools[delegationToolName(def)] = tool({
-            description: `Ask the ${def.name} agent. ${def.description}`,
-            inputSchema: delegationInput,
-            execute: async ({ task }) => runSpecialist(def, runtime, task),
-        });
+`src/db/repo/library.ts` — replace `listBookmarks`, add `updateBookmark`, extend snippets:
+
+```ts
+export async function listBookmarks(filter?: {
+    /** null → unfiled only; string → that project's; omitted → all. */
+    projectId?: string | null;
+}): Promise<Bookmark[]> {
+    let rows;
+    if (filter?.projectId === undefined) {
+        rows = await getDb().select(
+            "SELECT * FROM bookmarks ORDER BY group_name ASC, title ASC",
+        );
+    } else if (filter.projectId === null) {
+        rows = await getDb().select(
+            "SELECT * FROM bookmarks WHERE project_id IS NULL ORDER BY group_name ASC, title ASC",
+        );
+    } else {
+        rows = await getDb().select(
+            "SELECT * FROM bookmarks WHERE project_id = ? ORDER BY group_name ASC, title ASC",
+            [filter.projectId],
+        );
     }
-
-    const hasAgents = opts.agents.length > 0;
-
-    return new ToolLoopAgent({
-        model: runtime.routerModel,
-        instructions: hasAgents
-            ? opts.systemPrompt + ROUTING_ADDENDUM
-            : opts.systemPrompt,
-        tools,
-        stopWhen: stepCountIs(6),
-        // The chat transport injects the compaction summary as a system message.
-        allowSystemInMessages: true,
-        onEnd: (event) => {
-            runtime.onUsage?.({
-                agent: "orchestrator",
-                model: runtime.routerModelId,
-                usage: event.totalUsage,
-            });
-        },
-    });
+    return rows.map((r) => bookmarkSchema.parse(r));
 }
 
-async function runSpecialist(
-    def: AgentDef,
-    runtime: AgentRuntime,
-    task: string,
-): Promise<string> {
-    const { agent, modelId } = createAgentFromDef(def, runtime);
-    const result = await agent.generate({ prompt: task });
-    runtime.onUsage?.({
-        agent: agentSlug(def.name),
-        model: modelId,
-        usage: result.totalUsage,
-    });
-    return result.text || "(the specialist returned no text)";
+export async function updateBookmark(
+    id: string,
+    input: {
+        title: string;
+        url: string;
+        groupName: string;
+        projectId: string | null;
+    },
+): Promise<void> {
+    const res = await getDb().execute(
+        "UPDATE bookmarks SET title = ?, url = ?, group_name = ?, project_id = ? WHERE id = ?",
+        [input.title, input.url, input.groupName || "General", input.projectId, id],
+    );
+    if (res.rowsAffected === 0) throw new Error(`bookmark not found: ${id}`);
 }
 ```
 
-Delete `src/ai/agents/knowledge.ts` and `src/ai/agents/research.ts` (instructions live in the Task 2 seeds).
+Snippets: `createSnippet` input gains `groupName?: string` (INSERT gains `group_name` with `input.groupName ?? "General"`); `updateSnippet` input gains `groupName: string` (SET adds `group_name = ?`); `listSnippets` ORDER BY becomes `group_name ASC, title ASC`.
 
-- [ ] **Step 4: Update `src/lib/schemas.ts`**
-
-Remove `agentNameSchema` and `AgentName`. Replace `presetAgents` with:
+`src/db/repo/documents.ts` — `insertDocument` opts gain `projectId?: string | null`; add `project_id` to the INSERT column list with `opts.projectId ?? null`. Append:
 
 ```ts
-/** Agent ids (rows in the agents table) enabled by a preset. */
-export function presetAgents(preset: Preset): string[] {
-    return z.array(z.string()).parse(JSON.parse(preset.enabled_agents_json));
+/** Metadata-only listing for a project's Files panel. */
+export async function listProjectDocuments(projectId: string): Promise<Document[]> {
+    const rows = await getDb().select(
+        `SELECT id, title, source_name, mime_type, folder, '' AS content_text,
+                byte_size, page_count, project_id, created_at
+         FROM documents WHERE project_id = ? ORDER BY created_at DESC`,
+        [projectId],
+    );
+    return rows.map((r) => documentSchema.parse(r));
 }
 ```
 
-- [ ] **Step 5: Update `src/db/repo/presets.ts`**
+(Also add `project_id` to the column list in the existing `listDocuments` SELECT at line 46 so its rows still parse.)
 
-- `PresetInput.enabledAgents: AgentName[]` → `enabledAgents: string[]`; drop the `AgentName` import.
-- In `seedBuiltinPresets`, change seeds to ids: `enabledAgents: ["agt_knowledge"]` (Study) and `enabledAgents: ["agt_knowledge", "agt_research"]` (Research). Import `BUILTIN_AGENT_IDS` from `./agents` and use `BUILTIN_AGENT_IDS.knowledge` / `.research` instead of string literals.
+`src/db/repo/automations.ts` — mirror the pattern: create/update inputs gain `projectId?: string | null` (column `project_id` in INSERT/UPDATE), `listAutomations` gains optional `{ projectId?: string }` WHERE filter, matching the file's existing conventions.
 
-- [ ] **Step 6: Update `src/ai/agents/runtime.ts`**
+- [ ] **Step 4: Run tests**
 
-Replace the imports of `presetAgents` usage and orchestrator construction inside `buildSessionAgent`:
+Run: `npm test`
+Expected: PASS.
 
-```ts
-import { listAgents } from "@/db/repo/agents";
-// ...
-const enabled = new Set(presetAgents(preset));
-const agents = (await listAgents()).filter((a) => enabled.has(a.id));
+- [ ] **Step 5: Commit**
 
-const orchestrator = createOrchestrator(runtime, {
-    systemPrompt: preset.system_prompt,
-    agents,
-});
+```bash
+git add src/db/repo/sessions.ts src/db/repo/library.ts src/db/repo/documents.ts \
+  src/db/repo/automations.ts src/db/repo/library.test.ts src/db/repo/projects.test.ts
+git commit -m "feat: project filters + colors + bookmark/snippet editing in repos"
 ```
 
-(`resolveModel` already added in Task 5 Step 5. Agents deleted from the DB simply drop out of the filter — sessions keep working.)
+---
 
-- [ ] **Step 7: Create `src/ai/providers/appFetch.ts` and rewire networkData**
+### Task 6: Chat customization — rename + recolor
 
-```ts
-// src/ai/providers/appFetch.ts
-import { isTauri } from "@/lib/env";
-import { tauriFetch } from "./tauriFetch";
+`renameSession`/`setSessionColor` exist; give them UI in the instances sidebar, and make every color consumer honor the stored color.
 
-/** Desktop: plugin-http (no CORS). Browser: global fetch, bound so it isn't called detached. */
-export const appFetch: typeof globalThis.fetch = isTauri()
-    ? tauriFetch
-    : globalThis.fetch.bind(globalThis);
-```
+**Files:**
+- Modify: `src/components/hud/networkData.ts:82-100` (`sessionColor` signature), `src/app/chat/InstancesSidebar.tsx`, `src/app/chat/ChatPage.tsx`
 
-In `src/app/chat/ChatPage.tsx` delete the local `appFetch` const and import it from `@/ai/providers/appFetch`.
+**Interfaces:**
+- Produces: `sessionColor(session: ChatSession, preset: Preset | undefined, agentsById: Map<string, AgentDef>): string` — stored `session.color` wins, then single-specialist hue, then orchestrator.
+- `InstancesSidebar` gains props `onRename: (session: ChatSession, title: string) => void` and `onRecolor: (session: ChatSession, color: string | null) => void`.
 
-Rewrite the agent-dependent parts of `src/components/hud/networkData.ts` (drop the `agentCatalog` import; add `import { agentSlug, agentToolNames, type AgentDef } from "@/lib/schemas";`):
+- [ ] **Step 1: Update `sessionColor`**
+
+In `networkData.ts` replace the function (lines 83–91):
 
 ```ts
-/** Display info derived from a definition; color falls back to the identity hue. */
-function agentInfo(def: AgentDef) {
-    const slug = agentSlug(def.name);
-    return {
-        slug,
-        color: def.color ?? agentColor(slug),
-        tools: safeToolNames(def),
-    };
-}
-
-function safeToolNames(def: AgentDef): string[] {
-    try {
-        return agentToolNames(def);
-    } catch {
-        return [];
-    }
-}
-
-/** A session's identity color: its lone specialist, else the orchestrator hue. */
+/** A session's identity color: user-chosen, else its lone specialist, else orchestrator. */
 export function sessionColor(
+    session: ChatSession,
     preset: Preset | undefined,
     agentsById: Map<string, AgentDef>,
 ): string {
+    if (session.color) return session.color;
     if (!preset) return "var(--primary)";
     const ids = safeAgents(preset);
     const def = ids.length === 1 ? agentsById.get(ids[0]!) : undefined;
@@ -1146,603 +930,285 @@ export function sessionColor(
 }
 ```
 
-`attachAgent` now takes a def:
+Update its two call sites: `buildSessionNetwork` (line 199: `color: sessionColor(session, preset, agentsById),`) and both uses in `InstancesSidebar.tsx` (lines 105–110 and 157: pass the session first). Import `ChatSession` type where needed.
+
+- [ ] **Step 2: Add rename + recolor UI to the sidebar**
+
+In `InstancesSidebar.tsx`:
+- Add props `onRename` and `onRecolor` (signatures above) to the component's prop type and destructuring.
+- Add state: `const [renamingId, setRenamingId] = useState<string | null>(null);` and `const [draftTitle, setDraftTitle] = useState("");`
+- Add a constant above the component:
 
 ```ts
-function attachAgent(
-    net: Network,
-    hubId: string,
-    hubUnit: Vec3,
-    def: AgentDef,
-    slot: number,
-    slots: number,
-    idPrefix: string,
-) {
-    const unit = satelliteUnit(hubUnit, slot, slots, AGENT_SPREAD);
-    const { slug, color, tools } = agentInfo(def);
-    const agentId = `${idPrefix}:agent:${slug}`;
-    net.nodes.push({
-        id: agentId,
-        kind: "agent",
-        label: slug,
-        color,
-        unit,
-        r: AGENT_R,
-        parentId: hubId,
-        primary: false,
-        meta: {
-            title: def.name,
-            subtitle: def.description,
-            chips: tools.map((t) => ({ label: t })),
-        },
-    });
-    net.edges.push({ a: hubId, b: agentId });
-
-    tools.forEach((toolName, ti) => {
-        const tUnit = satelliteUnit(unit, ti, tools.length, TOOL_SPREAD);
-        const toolId = `${agentId}:tool:${toolName}`;
-        net.nodes.push({
-            id: toolId,
-            kind: "tool",
-            label: toolName,
-            color,
-            unit: tUnit,
-            r: TOOL_R,
-            parentId: hubId,
-            primary: false,
-            meta: { title: toolName, subtitle: `tool · ${slug}` },
-        });
-        net.edges.push({ a: agentId, b: toolId });
-    });
-}
+/** Swatches for user recoloring — the agent identity hues plus neutrals. */
+export const SESSION_COLORS = [
+    "#22d3ee", "#a78bfa", "#f472b6", "#fb923c",
+    "#facc15", "#4ade80", "#60a5fa", "#f87171",
+] as const;
 ```
 
-`buildSessionNetwork` gains a third parameter and resolves defs:
-
-```ts
-export function buildSessionNetwork(
-    sessions: ChatSession[],
-    presets: Preset[],
-    agents: AgentDef[],
-): Network {
-    const shown = sessions.slice(0, MAX_SESSIONS);
-    const hubUnits = fibonacciSphere(shown.length);
-    const presetById = new Map(presets.map((p) => [p.id, p]));
-    const agentsById = new Map(agents.map((a) => [a.id, a]));
-    const net: Network = { nodes: [], edges: [] };
-
-    shown.forEach((session, i) => {
-        const hubUnit = hubUnits[i]!;
-        const preset = session.preset_id
-            ? presetById.get(session.preset_id)
-            : undefined;
-        const defs = safeAgents(preset)
-            .map((id) => agentsById.get(id))
-            .filter((d): d is AgentDef => d !== undefined);
-        const hubId = `session:${session.id}`;
-        net.nodes.push({
-            id: hubId,
-            kind: "session",
-            label: session.title,
-            color: sessionColor(preset, agentsById),
-            unit: hubUnit,
-            r: HUB_R,
-            primary: true,
-            meta: {
-                title: session.title,
-                subtitle: preset
-                    ? `${preset.name} · ${preset.provider}/${preset.model}`
-                    : "no preset",
-                chips: defs.map((d) => {
-                    const info = agentInfo(d);
-                    return { label: info.slug, color: info.color };
-                }),
-                foot: `updated ${relativeTime(session.updated_at)}`,
-            },
-            payload: session,
-        });
-        defs.forEach((def, k) =>
-            attachAgent(net, hubId, hubUnit, def, k, defs.length, hubId),
-        );
-    });
-
-    return net;
-}
-```
-
-`buildAgentTypeNetwork` becomes DB-driven (payload carries the **id** so click handlers match preset contents):
-
-```ts
-/** Orchestrator hub → every defined agent → its tools. */
-export function buildAgentTypeNetwork(agents: AgentDef[]): Network {
-    const units = fibonacciSphere(agents.length + 1);
-    const net: Network = { nodes: [], edges: [] };
-
-    net.nodes.push({
-        id: "agent:orchestrator",
-        kind: "agent",
-        label: "orchestrator",
-        color: ORCHESTRATOR,
-        unit: units[0]!,
-        r: HUB_R,
-        primary: true,
-        meta: {
-            title: "Orchestrator",
-            subtitle:
-                "Runs on the preset's router model. Answers directly when it can; delegates to your agents as tool calls.",
-        },
-        payload: { agent: "orchestrator" },
-    });
-
-    agents.forEach((def, i) => {
-        const unit = units[i + 1]!;
-        const { slug, color, tools } = agentInfo(def);
-        const id = `agent:${def.id}`;
-        net.nodes.push({
-            id,
-            kind: "agent",
-            label: slug,
-            color,
-            unit,
-            r: AGENT_R + 0.3,
-            primary: true,
-            meta: {
-                title: def.name,
-                subtitle: def.description,
-                chips: tools.map((t) => ({ label: t })),
-            },
-            payload: { agent: def.id },
-        });
-        net.edges.push({ a: "agent:orchestrator", b: id });
-
-        tools.forEach((toolName, ti) => {
-            const tUnit = satelliteUnit(unit, ti, tools.length, TOOL_SPREAD);
-            const toolId = `${id}:tool:${toolName}`;
-            net.nodes.push({
-                id: toolId,
-                kind: "tool",
-                label: toolName,
-                color,
-                unit: tUnit,
-                r: TOOL_R,
-                parentId: id,
-                primary: false,
-                meta: { title: toolName, subtitle: `tool · ${slug}` },
-            });
-            net.edges.push({ a: id, b: toolId });
-        });
-    });
-
-    return net;
-}
-```
-
-Delete `src/components/hud/agentCatalog.ts`.
-
-- [ ] **Step 8: UI call-site fallout**
-
-`src/app/chat/ChatPage.tsx`:
-- Drop the `AgentName` import; add `import { listAgents } from "@/db/repo/agents";` and `import type { AgentDef } from "@/lib/schemas";`.
-- Add state `const [agents, setAgents] = useState<AgentDef[]>([]);` and load it wherever presets/levels load: `setAgents(await listAgents());`.
-- Network memo: `buildSessionNetwork(sessions, presets, agents)` / `buildAgentTypeNetwork(agents)`, deps `[sessions, presets, agents]`.
-- `openFromNode` fallback: the payload agent is now an **id**, so the cast disappears: `return presetAgents(p).includes(agent);`.
-
-`src/app/chat/InstancesSidebar.tsx` (both `sessionColor(preset)` calls, lines ~94 and ~145):
-- Add an `agents: AgentDef[]` prop (ChatPage passes its loaded `agents` state).
-- Build the lookup once: `const agentsById = useMemo(() => new Map(agents.map((a) => [a.id, a])), [agents]);`
-- Change both calls to `sessionColor(preset, agentsById)`.
-
-`src/app/presets/PresetsPage.tsx`:
-- Delete `const ALL_AGENTS: AgentName[] = [...]` and the `AgentName` import.
-- Load agents: `const [agents, setAgents] = useState<AgentDef[]>([]);` set in `reload()` via `listAgents()`; pass `agents` into `PresetForm`.
-- Checkbox list becomes:
+- In the row (next to the existing delete `IconButton`, line ~224), add:
 
 ```tsx
-<div className="flex flex-wrap items-center gap-4 text-sm">
-    Agents:
-    {agents.map((a) => (
-        <label key={a.id} className="flex items-center gap-1.5">
-            <input
-                type="checkbox"
-                checked={form.enabledAgents.includes(a.id)}
-                onChange={() => toggleAgent(a.id)}
-            />
-            {a.name}
-        </label>
-    ))}
-</div>
+                                        <IconButton
+                                            label="Rename chat"
+                                            onClick={() => {
+                                                setRenamingId(s.id);
+                                                setDraftTitle(s.title);
+                                            }}
+                                        >
+                                            <Pencil className="h-3.5 w-3.5" />
+                                        </IconButton>
 ```
 
-with `toggleAgent = (id: string) => ...` (same body, string typed).
+(import `Pencil` from lucide-react.)
 
-`src/app/agents/AgentsPage.tsx` — minimal compile fix now (full roster UI is Task 7): load defs and render them.
+- When `renamingId === s.id`, render this instead of the title button (the `<button onClick={() => onOpen(s)}>` block, lines 189–201):
 
 ```tsx
-import { useEffect, useMemo, useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { NetworkSphere } from "@/components/hud/NetworkSphere";
-import { buildAgentTypeNetwork } from "@/components/hud/networkData";
-import { agentColor } from "@/components/hud/AgentNode";
-import { listAgents } from "@/db/repo/agents";
-import { agentSlug, agentToolNames, type AgentDef } from "@/lib/schemas";
+                                <input
+                                    autoFocus
+                                    value={draftTitle}
+                                    onChange={(e) => setDraftTitle(e.target.value)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === "Enter") {
+                                            onRename(s, draftTitle.trim() || s.title);
+                                            setRenamingId(null);
+                                        }
+                                        if (e.key === "Escape") setRenamingId(null);
+                                    }}
+                                    onBlur={() => {
+                                        onRename(s, draftTitle.trim() || s.title);
+                                        setRenamingId(null);
+                                    }}
+                                    className="min-w-0 flex-1 rounded-sm border border-primary/40 bg-transparent px-1 py-0.5 text-xs focus-visible:outline-none"
+                                />
+```
 
-export function AgentsPage() {
-    const [agents, setAgents] = useState<AgentDef[]>([]);
-    useEffect(() => {
-        void listAgents().then(setAgents);
-    }, []);
-    const network = useMemo(() => buildAgentTypeNetwork(agents), [agents]);
+- In the expanded details panel (after the "Updated" `<Detail>`, line ~292), add an appearance row:
 
-    return (
-        <div className="h-full overflow-y-auto p-6">
-            <div className="mx-auto flex max-w-4xl flex-col gap-6">
-                <header>
-                    <h1 className="font-display text-2xl font-bold tracking-wide">
-                        Agent network
-                    </h1>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                        Every tool call — orchestrator or specialist — passes
-                        through the permission engine. Nothing runs silently.
-                    </p>
-                </header>
-                <div className="flex justify-center">
-                    <NetworkSphere
-                        nodes={network.nodes}
-                        edges={network.edges}
-                        size={320}
-                    />
-                </div>
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                    {agents.map((a) => {
-                        const color = a.color ?? agentColor(agentSlug(a.name));
-                        return (
-                            <Card
-                                key={a.id}
-                                style={{ borderLeft: `2px solid ${color}` }}
-                            >
-                                <CardHeader>
-                                    <CardTitle className="text-sm">
-                                        {a.name}
-                                    </CardTitle>
-                                </CardHeader>
-                                <CardContent className="flex flex-col gap-2">
-                                    <p className="text-xs text-muted-foreground">
-                                        {a.description}
-                                    </p>
-                                    <div className="flex flex-wrap gap-1">
-                                        {agentToolNames(a).map((t) => (
-                                            <code
-                                                key={t}
-                                                className="rounded-sm bg-muted px-1.5 py-0.5 font-mono text-[10px] text-foreground/80"
+```tsx
+                                    <Detail label="Color">
+                                        <div className="flex flex-wrap justify-end gap-1">
+                                            {SESSION_COLORS.map((c) => (
+                                                <button
+                                                    key={c}
+                                                    aria-label={`Set color ${c}`}
+                                                    onClick={() => onRecolor(s, c)}
+                                                    className={cn(
+                                                        "h-3.5 w-3.5 cursor-pointer rounded-full border border-transparent hover:scale-110",
+                                                        s.color === c &&
+                                                            "ring-1 ring-foreground/60",
+                                                    )}
+                                                    style={{ background: c }}
+                                                />
+                                            ))}
+                                            <button
+                                                aria-label="Automatic color"
+                                                onClick={() => onRecolor(s, null)}
+                                                className="rounded-sm px-1 font-mono text-[9px] uppercase text-muted-foreground hover:text-foreground"
                                             >
-                                                {t}
-                                            </code>
-                                        ))}
-                                    </div>
-                                </CardContent>
-                            </Card>
-                        );
-                    })}
-                </div>
-            </div>
-        </div>
-    );
-}
+                                                auto
+                                            </button>
+                                        </div>
+                                    </Detail>
 ```
 
-`evals/router.eval.ts`: replace `enabledAgents: ["knowledge", "research"]` with inline defs (same routing behavior, so the ≥85% gate still applies):
+- [ ] **Step 3: Wire the callbacks in ChatPage**
+
+In `ChatPage.tsx` add next to `deleteInstance`:
 
 ```ts
-import type { AgentDef } from "@/lib/schemas";
+    const renameInstance = useCallback(
+        async (session: ChatSession, title: string) => {
+            if (title === session.title) return;
+            await sessionsRepo.renameSession(session.id, title);
+            setSessions(await sessionsRepo.listSessions());
+            setActive((cur) =>
+                cur?.session.id === session.id
+                    ? { ...cur, session: { ...cur.session, title } }
+                    : cur,
+            );
+        },
+        [],
+    );
 
-const evalDef = (
-    name: string,
-    description: string,
-    tools: string[],
-): AgentDef => ({
-    id: `agt_${name.toLowerCase()}`,
-    name,
-    description,
-    instructions: `You are the ${name} agent.`,
-    tools_json: JSON.stringify(tools),
-    model: null,
-    max_steps: 6,
-    color: null,
-    is_builtin: 1,
-    created_at: 0,
-    updated_at: 0,
-});
-// in the task body:
-const orchestrator = createOrchestrator(runtime, {
-    systemPrompt: "...unchanged...",
-    agents: [
-        evalDef(
-            "Knowledge",
-            "Searches and reads the user's stored documents and notes.",
-            ["search_documents", "read_document", "list_documents"],
-        ),
-        evalDef("Research", "Reads specific web pages.", ["fetch_url"]),
-    ],
-});
+    const recolorInstance = useCallback(
+        async (session: ChatSession, color: string | null) => {
+            await sessionsRepo.setSessionColor(session.id, color);
+            setSessions(await sessionsRepo.listSessions());
+        },
+        [],
+    );
 ```
 
-Also add `resolveModel` to the eval's runtime literal if `evals/models.ts` builds one: `resolveModel: () => mainModel,` (check that file; typecheck will point at it).
+and pass `onRename={(s, t) => void renameInstance(s, t)}` and `onRecolor={(s, c) => void recolorInstance(s, c)}` to `<InstancesSidebar …>`.
 
-- [ ] **Step 9: Full verification**
+- [ ] **Step 4: Verify**
 
-Run: `npm test` — Expected: all suites PASS (orchestrator scenarios byte-identical in behavior).
-Run: `npm run typecheck` — Expected: clean; `grep -rn "AgentName\|agentCatalog\|agents/knowledge\|agents/research" src evals` returns nothing.
-Manual: `npm run dev` (web target) — Agents page renders both builtin agents from the DB; chat with the Study preset still delegates to knowledge.
+Run: `npm run typecheck && npm test` → pass.
+Run: `npm run dev` → rename a chat (Enter commits, Escape cancels), pick a swatch (dot, sphere node, and collapsed-rail dot all adopt it), "auto" reverts to the preset-derived hue.
 
-- [ ] **Step 10: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add -A
-git commit -m "feat: DB-driven agents — dynamic orchestrator, enum removal, UI fallout"
+git add src/components/hud/networkData.ts src/app/chat/InstancesSidebar.tsx src/app/chat/ChatPage.tsx
+git commit -m "feat: rename and recolor chats from the instances sidebar"
 ```
+
 ---
 
-## Milestone B — Agents page: roster editor + test bench
-
-### Task 7: tabbed Agents page + roster CRUD
+### Task 7: FilterChips component + task category filter
 
 **Files:**
-- Modify: `src/app/agents/AgentsPage.tsx`
-- Create: `src/app/agents/AgentEditor.tsx`
+- Create: `src/components/ui/filterChips.tsx`
+- Modify: `src/app/tasks/TasksPage.tsx` (task list filtering; also de-studentify its copy while here)
 
 **Interfaces:**
-- Consumes: agents repo (Task 2), `TOOL_CATALOG` (Task 4).
-- Produces: `AgentsPage` with a `tab` state (`"roster" | "pipelines" | "automations"`) and a `TabBar` component reused by Tasks 12/15 (they replace the two placeholder tab bodies); `AgentEditor({ agent, onDone })`.
+- Produces: `FilterChips({ options, active, onChange, allLabel? })` with `options: { id: string; label: string; color?: string }[]`, `active: string | null`, `onChange: (id: string | null) => void`. Renders nothing when `options.length === 0` (so single-category users never see chrome).
 
-No unit tests (pure UI over tested repos) — verification is typecheck + manual.
+- [ ] **Step 1: Create the component**
 
-- [ ] **Step 1: Create `src/app/agents/AgentEditor.tsx`**
-
-```tsx
-import { useState } from "react";
-import * as agentsRepo from "@/db/repo/agents";
-import { TOOL_CATALOG } from "@/ai/tools/catalog";
-import { agentToolNames, type AgentDef } from "@/lib/schemas";
-import { Button } from "@/components/ui/button";
-import { Input, Textarea } from "@/components/ui/input";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-
-const GROUPS = ["documents", "notes", "web"] as const;
-
-export function AgentEditor({
-    agent,
-    onDone,
-}: {
-    agent: AgentDef | null; // null = create
-    onDone: () => Promise<void>;
-}) {
-    const [form, setForm] = useState<agentsRepo.AgentInput>(() =>
-        agent
-            ? {
-                  name: agent.name,
-                  description: agent.description,
-                  instructions: agent.instructions,
-                  tools: agentToolNames(agent),
-                  model: agent.model,
-                  maxSteps: agent.max_steps,
-                  color: agent.color,
-              }
-            : {
-                  name: "",
-                  description: "",
-                  instructions: "You are a helpful specialist agent.",
-                  tools: [],
-                  model: null,
-                  maxSteps: 6,
-                  color: null,
-              },
-    );
-    const [error, setError] = useState<string | null>(null);
-
-    const save = async () => {
-        setError(null);
-        try {
-            if (agent) await agentsRepo.updateAgent(agent.id, form);
-            else await agentsRepo.createAgent(form);
-            await onDone();
-        } catch (e) {
-            setError(e instanceof Error ? e.message : String(e));
-        }
-    };
-
-    const toggleTool = (name: string) => {
-        setForm((f) => ({
-            ...f,
-            tools: f.tools.includes(name)
-                ? f.tools.filter((t) => t !== name)
-                : [...f.tools, name],
-        }));
-    };
-
-    return (
-        <Card>
-            <CardHeader>
-                <CardTitle>{agent ? `Edit ${agent.name}` : "New agent"}</CardTitle>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-3">
-                <div className="flex gap-3">
-                    <label className="flex flex-1 flex-col gap-1 text-sm">
-                        Name
-                        <Input
-                            value={form.name}
-                            onChange={(e) =>
-                                setForm({ ...form, name: e.target.value })
-                            }
-                        />
-                    </label>
-                    <label className="flex flex-1 flex-col gap-1 text-sm">
-                        Model override
-                        <Input
-                            value={form.model ?? ""}
-                            placeholder="(preset main model)"
-                            onChange={(e) =>
-                                setForm({
-                                    ...form,
-                                    model: e.target.value || null,
-                                })
-                            }
-                        />
-                    </label>
-                    <label className="flex w-28 flex-col gap-1 text-sm">
-                        Max steps
-                        <Input
-                            type="number"
-                            min={1}
-                            value={form.maxSteps ?? 6}
-                            onChange={(e) =>
-                                setForm({
-                                    ...form,
-                                    maxSteps: Number(e.target.value) || 6,
-                                })
-                            }
-                        />
-                    </label>
-                </div>
-                <label className="flex flex-col gap-1 text-sm">
-                    Description
-                    <Input
-                        value={form.description}
-                        placeholder="What the orchestrator reads when deciding to delegate"
-                        onChange={(e) =>
-                            setForm({ ...form, description: e.target.value })
-                        }
-                    />
-                </label>
-                <label className="flex flex-col gap-1 text-sm">
-                    Instructions (system prompt)
-                    <Textarea
-                        rows={6}
-                        value={form.instructions}
-                        onChange={(e) =>
-                            setForm({ ...form, instructions: e.target.value })
-                        }
-                    />
-                </label>
-                <div className="flex flex-col gap-2 text-sm">
-                    Tools
-                    {GROUPS.map((group) => (
-                        <div
-                            key={group}
-                            className="flex flex-wrap items-center gap-3"
-                        >
-                            <span className="w-20 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-                                {group}
-                            </span>
-                            {TOOL_CATALOG.filter((t) => t.group === group).map(
-                                (t) => (
-                                    <label
-                                        key={t.name}
-                                        className="flex items-center gap-1.5"
-                                        title={t.label}
-                                    >
-                                        <input
-                                            type="checkbox"
-                                            checked={form.tools.includes(t.name)}
-                                            onChange={() => toggleTool(t.name)}
-                                        />
-                                        <code className="font-mono text-xs">
-                                            {t.name}
-                                        </code>
-                                        {t.access === "write" && (
-                                            <span className="font-mono text-[10px] uppercase text-warning">
-                                                write
-                                            </span>
-                                        )}
-                                    </label>
-                                ),
-                            )}
-                        </div>
-                    ))}
-                </div>
-                <label className="flex w-56 flex-col gap-1 text-sm">
-                    Color (CSS value, optional)
-                    <Input
-                        value={form.color ?? ""}
-                        placeholder="var(--agent-knowledge)"
-                        onChange={(e) =>
-                            setForm({ ...form, color: e.target.value || null })
-                        }
-                    />
-                </label>
-                <div className="flex items-center gap-3">
-                    <Button onClick={() => void save()}>Save</Button>
-                    <Button variant="ghost" onClick={() => void onDone()}>
-                        Cancel
-                    </Button>
-                    {error && (
-                        <span className="text-xs text-destructive">{error}</span>
-                    )}
-                </div>
-            </CardContent>
-        </Card>
-    );
-}
-```
-
-- [ ] **Step 2: Rewrite `src/app/agents/AgentsPage.tsx` with tabs + roster actions**
+`src/components/ui/filterChips.tsx`:
 
 ```tsx
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Copy, Pencil, Trash2 } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { NetworkSphere } from "@/components/hud/NetworkSphere";
-import { buildAgentTypeNetwork } from "@/components/hud/networkData";
-import { agentColor } from "@/components/hud/AgentNode";
-import * as agentsRepo from "@/db/repo/agents";
-import { agentSlug, agentToolNames, type AgentDef } from "@/lib/schemas";
-import { AgentEditor } from "./AgentEditor";
 import { cn } from "@/lib/utils";
 
-type Tab = "roster" | "pipelines" | "automations";
-const TABS: { id: Tab; label: string }[] = [
-    { id: "roster", label: "Roster" },
-    { id: "pipelines", label: "Pipelines" },
-    { id: "automations", label: "Automations" },
-];
+export interface FilterOption {
+    id: string;
+    label: string;
+    color?: string;
+}
 
-export function AgentsPage() {
-    const [tab, setTab] = useState<Tab>("roster");
-
+/**
+ * One-tap category filter row: "All" plus one chip per option.
+ * Renders nothing when there are no options — no chrome for empty categories.
+ */
+export function FilterChips({
+    options,
+    active,
+    onChange,
+    allLabel = "All",
+}: {
+    options: FilterOption[];
+    active: string | null;
+    onChange: (id: string | null) => void;
+    allLabel?: string;
+}) {
+    if (options.length === 0) return null;
+    const chip = (selected: boolean, color?: string) =>
+        cn(
+            "cursor-pointer rounded-full border px-2.5 py-0.5 font-mono text-[10px] uppercase tracking-wider transition-colors duration-(--dur-fast) focus-visible:outline-2 focus-visible:outline-ring",
+            selected
+                ? "border-primary/50 bg-primary/15 text-primary"
+                : "border-border text-muted-foreground hover:text-foreground",
+            selected && color && "text-[inherit]",
+        );
     return (
-        <div className="h-full overflow-y-auto p-6">
-            <div className="mx-auto flex max-w-4xl flex-col gap-6">
-                <header>
-                    <h1 className="font-display text-2xl font-bold tracking-wide">
-                        Agents
-                    </h1>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                        Define agents, chain them into pipelines, put pipelines
-                        on a schedule. Every tool call passes the permission
-                        engine — nothing runs silently.
-                    </p>
-                </header>
-                <TabBar tab={tab} onSelect={setTab} />
-                {tab === "roster" && <RosterTab />}
-                {tab === "pipelines" && <PipelinesPlaceholder />}
-                {tab === "automations" && <AutomationsPlaceholder />}
-            </div>
+        <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Filter">
+            <button className={chip(active === null)} onClick={() => onChange(null)}>
+                {allLabel}
+            </button>
+            {options.map((o) => (
+                <button
+                    key={o.id}
+                    className={chip(active === o.id, o.color)}
+                    style={
+                        active === o.id && o.color
+                            ? {
+                                  color: o.color,
+                                  borderColor: `color-mix(in oklab, ${o.color} 50%, transparent)`,
+                                  background: `color-mix(in oklab, ${o.color} 12%, transparent)`,
+                              }
+                            : undefined
+                    }
+                    onClick={() => onChange(active === o.id ? null : o.id)}
+                >
+                    {o.label}
+                </button>
+            ))}
         </div>
     );
 }
+```
 
-function TabBar({ tab, onSelect }: { tab: Tab; onSelect: (t: Tab) => void }) {
+- [ ] **Step 2: Apply to tasks**
+
+In `TasksPage.tsx`:
+- Add state `const [courseFilter, setCourseFilter] = useState<string | null>(null);` in `TasksPage`.
+- Between `<QuickAdd …/>` and `<TaskList …/>` insert:
+
+```tsx
+                <FilterChips
+                    options={courses.map((c) => ({
+                        id: c.id,
+                        label: c.code,
+                        color: c.color ?? undefined,
+                    }))}
+                    active={courseFilter}
+                    onChange={setCourseFilter}
+                />
+```
+
+- Pass filtered tasks: `<TaskList tasks={courseFilter ? tasks.filter((t) => t.course_id === courseFilter) : tasks} …/>`.
+- Copy de-studentification in the same file: header subtitle `"Assignments, follow-ups, and the class schedule — also readable by the planner agent."` → `"Everything with a deadline — also readable by the planner agent."`; QuickAdd placeholder `"e.g. ECE 437 lab 3 report"` → `"e.g. Ship the quarterly report"`; wrap the Course `<label>` in `{courses.length > 0 && (…)}` so users with no courses never see it.
+
+- [ ] **Step 3: Verify**
+
+Run: `npm run typecheck && npm test` → pass.
+Run: `npm run dev` → with ≥1 course: chips appear, clicking filters, clicking again clears; with 0 courses: no chips, no Course select.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add src/components/ui/filterChips.tsx src/app/tasks/TasksPage.tsx
+git commit -m "feat: FilterChips component + course filter on tasks, general-audience copy"
+```
+
+---
+
+### Task 8: Notes section — Notes | Bookmarks | Snippets tabs (+ NavTarget plumbing)
+
+Two things land here because the second needs the first consumer: (a) the shared `TabBar` + `NavTarget` navigation pattern, (b) the Library merge into Notes with filtering and editing.
+
+**Files:**
+- Create: `src/components/ui/tabs.tsx`, `src/app/notes/BookmarksTab.tsx`, `src/app/notes/SnippetsTab.tsx`
+- Modify: `src/app/notes/NotesPage.tsx`, `src/app/Sidebar.tsx` (Page/NavTarget types), `src/app/Shell.tsx`, `src/components/palette/CommandPalette.tsx`
+- Delete: `src/app/library/LibraryPage.tsx`
+
+**Interfaces:**
+- Produces:
+  - `src/components/ui/tabs.tsx`: `TabBar<T extends string>({ tabs, active, onSelect }: { tabs: { id: T; label: string }[]; active: T; onSelect: (t: T) => void })` — exact JSX of `AgentsPage.tsx`'s local `TabBar` (lines 49–69), generic over the id type.
+  - `Sidebar.tsx`: `export interface NavTarget { page: Page; tab?: string }` and `Page` loses `"library"`.
+  - `Shell.tsx`: nav state is `useState<NavTarget>({ page: "home" })`; `CommandPalette` prop becomes `onNavigate: (t: NavTarget) => void`; section pages accept `tab?: string`.
+  - `NotesPage({ tab }: { tab?: string })` with tabs `"notes" | "bookmarks" | "snippets"`; syncs via `useEffect` when the `tab` prop changes.
+
+- [ ] **Step 1: Extract the shared TabBar**
+
+Create `src/components/ui/tabs.tsx` by lifting `TabBar` from `AgentsPage.tsx:49-69` verbatim, made generic:
+
+```tsx
+import { cn } from "@/lib/utils";
+
+export function TabBar<T extends string>({
+    tabs,
+    active,
+    onSelect,
+}: {
+    tabs: { id: T; label: string }[];
+    active: T;
+    onSelect: (t: T) => void;
+}) {
     return (
         <div className="flex gap-1 border-b border-border">
-            {TABS.map((t) => (
+            {tabs.map((t) => (
                 <button
                     key={t.id}
                     onClick={() => onSelect(t.id)}
-                    aria-current={tab === t.id ? "page" : undefined}
+                    aria-current={active === t.id ? "page" : undefined}
                     className={cn(
                         "cursor-pointer border-b-2 px-4 py-2 font-mono text-[11px] uppercase tracking-[0.18em] transition-colors duration-(--dur-fast) focus-visible:outline-2 focus-visible:outline-ring",
-                        tab === t.id
+                        active === t.id
                             ? "border-primary text-primary"
                             : "border-transparent text-muted-foreground hover:text-foreground",
                     )}
@@ -1753,33 +1219,172 @@ function TabBar({ tab, onSelect }: { tab: Tab; onSelect: (t: Tab) => void }) {
         </div>
     );
 }
+```
 
-// Replaced by the real tabs in Tasks 12 and 15.
-function PipelinesPlaceholder() {
+Update `AgentsPage.tsx` to import it and delete its local copy (its call site changes from `tab=`/`onSelect=` to `tabs={TABS} active={tab} onSelect={setTab}`).
+
+- [ ] **Step 2: Introduce NavTarget**
+
+In `Sidebar.tsx`: remove `"library"` from `Page`; add `export interface NavTarget { page: Page; tab?: string }`. Remove the Library nav item (line 52) and the now-unused `Bookmark` icon import.
+
+In `Shell.tsx`:
+
+```tsx
+    const [nav, setNav] = useState<NavTarget>({ page: "home" });
+```
+
+- Remove `library: LibraryPage` from `PAGES` and its import; delete `src/app/library/LibraryPage.tsx` (`git rm`).
+- Render with tab pass-through — replace `const Active = PAGES[page];` and the `<Active />` usage:
+
+```tsx
+    const Active = PAGES[nav.page];
+    …
+                        <motion.div key={nav.page} …>
+                            {nav.page === "notes" ? (
+                                <NotesPage tab={nav.tab} />
+                            ) : (
+                                <Active />
+                            )}
+                        </motion.div>
+```
+
+- `Sidebar` gets `onNavigate={(p) => setNav({ page: p })}`; `CommandPalette` gets `onNavigate={setNav}`.
+
+In `CommandPalette.tsx`: change `NAV` to `{ target: NavTarget; label: string }[]`, replacing the `library` row:
+
+```ts
+const NAV: { target: NavTarget; label: string }[] = [
+    { target: { page: "home" }, label: "Home" },
+    { target: { page: "chat" }, label: "Chat" },
+    { target: { page: "agents" }, label: "Agents" },
+    { target: { page: "notes" }, label: "Notes" },
+    { target: { page: "notes", tab: "bookmarks" }, label: "Bookmarks" },
+    { target: { page: "notes", tab: "snippets" }, label: "Snippets" },
+    { target: { page: "tasks" }, label: "Tasks" },
+    { target: { page: "applications" }, label: "Applications" },
+    { target: { page: "review" }, label: "Review" },
+    { target: { page: "presets" }, label: "Presets" },
+    { target: { page: "permissions" }, label: "Permissions" },
+    { target: { page: "settings" }, label: "Settings" },
+];
+```
+
+and update `go`/`onSelect` accordingly (`onNavigate(n.target)`).
+
+- [ ] **Step 3: Build the Bookmarks and Snippets tabs**
+
+Create `src/app/notes/BookmarksTab.tsx`: move `BookmarksCard` from `LibraryPage.tsx` and upgrade it:
+- Load `projects` via `listProjects()` alongside bookmarks (`useEffect` + `reload`).
+- Above the list: `<FilterChips options={filterOptions} active={filter} onChange={setFilter} />` where `filterOptions` = each distinct `group_name` (`id: `grp:${g}``) followed by each project (`id: `prj:${p.id}``, `color: p.color ?? undefined`).
+- Filter predicate:
+
+```ts
+    const visible = bookmarks.filter((b) => {
+        if (!filter) return true;
+        if (filter.startsWith("grp:")) return b.group_name === filter.slice(4);
+        return b.project_id === filter.slice(4);
+    });
+```
+
+- Each row gains a `Pencil` icon button that swaps the row into edit mode (Inputs for title/url/group + a project `<Select>` of `projects` with a "No project" option), committing via `lib.updateBookmark(b.id, { title, url, groupName, projectId })` on save. A bookmark with a `project_id` shows the project name as a small colored chip.
+- The add form (title/url/group inputs, unchanged behavior) gains a project `<Select>` (default "No project") passed to `createBookmark`; the default group state `"School"` becomes `"General"`.
+
+Create `src/app/notes/SnippetsTab.tsx`: move `SnippetsCard` similarly:
+- Add form gains a `Group` input (default `"General"`) → `createSnippet({ title, body, groupName })`.
+- `<FilterChips>` over distinct `group_name`s.
+- Pencil button → inline edit (title/body/group) committing via `updateSnippet(s.id, { title, body, groupName })`.
+
+Both files keep the observatory look: reuse `Card`, `Input`, `Button`, mono uppercase group headers, exactly as in `LibraryPage.tsx`.
+
+- [ ] **Step 4: Tab-ify NotesPage**
+
+Rework `NotesPage.tsx`'s outer shell (the note list/editor split stays exactly as-is, it just becomes the `"notes"` tab):
+
+```tsx
+type NotesTab = "notes" | "bookmarks" | "snippets";
+const TABS: { id: NotesTab; label: string }[] = [
+    { id: "notes", label: "Notes" },
+    { id: "bookmarks", label: "Bookmarks" },
+    { id: "snippets", label: "Snippets" },
+];
+const isTab = (t: string | undefined): t is NotesTab =>
+    t === "notes" || t === "bookmarks" || t === "snippets";
+
+export function NotesPage({ tab }: { tab?: string }) {
+    const [active, setActive] = useState<NotesTab>(isTab(tab) ? tab : "notes");
+    useEffect(() => {
+        if (isTab(tab)) setActive(tab);
+    }, [tab]);
+
     return (
-        <p className="text-sm text-muted-foreground">Pipelines arrive next.</p>
+        <div className="flex h-full flex-col">
+            <div className="px-6 pt-4">
+                <TabBar tabs={TABS} active={active} onSelect={setActive} />
+            </div>
+            {active === "notes" ? (
+                <div className="min-h-0 flex-1">{/* existing list+editor JSX */}</div>
+            ) : (
+                <div className="min-h-0 flex-1 overflow-y-auto p-6">
+                    <div className="mx-auto flex max-w-3xl flex-col gap-6">
+                        {active === "bookmarks" ? <BookmarksTab /> : <SnippetsTab />}
+                    </div>
+                </div>
+            )}
+        </div>
     );
 }
-function AutomationsPlaceholder() {
-    return (
-        <p className="text-sm text-muted-foreground">Automations arrive next.</p>
-    );
-}
+```
 
-function RosterTab() {
-    const [agents, setAgents] = useState<AgentDef[]>([]);
-    const [editing, setEditing] = useState<AgentDef | "new" | null>(null);
-    const [selected, setSelected] = useState<string | null>(null);
+(The former `LibraryPage` header copy "all reachable from ⌘K" moves into a one-line `<p>` above the cards in each tab.)
+
+- [ ] **Step 5: Verify**
+
+Run: `npm run typecheck && npm test` → pass (palette search of library items still works — `searchLibrary` is untouched; update the palette's library-hit navigation, if it navigated to the `library` page, to `{ page: "notes", tab: hit.kind === "bookmark" ? "bookmarks" : "snippets" }`).
+Run: `npm run dev` → Notes shows three tabs; ⌘K "Bookmarks" lands on the right tab; add/edit/delete/filter bookmarks and snippets all work; Library is gone from the sidebar.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add -A src/app/notes src/app/library src/components/ui/tabs.tsx \
+  src/app/Sidebar.tsx src/app/Shell.tsx src/components/palette/CommandPalette.tsx \
+  src/app/agents/AgentsPage.tsx
+git commit -m "feat: fold Library into Notes as Bookmarks/Snippets tabs with filters"
+```
+
+---
+
+### Task 9: Planner section — Tasks | Calendar | Applications | Review
+
+One deadline-oriented section replaces three top-level pages; courses live inside the Calendar tab (still fully functional, no longer "out of the box" prominent).
+
+**Files:**
+- Create: `src/app/planner/PlannerPage.tsx`, `src/app/planner/CalendarTab.tsx`
+- Move: `git mv src/app/tasks/TasksPage.tsx src/app/planner/TasksTab.tsx`, `git mv src/app/applications/ApplicationsPage.tsx src/app/planner/ApplicationsTab.tsx`, `git mv src/app/review/ReviewPage.tsx src/app/planner/ReviewTab.tsx` (then `rmdir` the empty dirs)
+- Modify: `src/app/Shell.tsx`, `src/app/Sidebar.tsx`, `src/components/palette/CommandPalette.tsx`, `src/app/home/HomePage.tsx` (copy)
+
+**Interfaces:**
+- Produces: `PlannerPage({ tab }: { tab?: string })` with tabs `"tasks" | "calendar" | "applications" | "review"`. Tab components export `TasksTab()`, `CalendarTab()`, `ApplicationsTab()`, `ReviewTab()` — each is the old page body **without** its own `h-full overflow-y-auto p-6` wrapper and `<header>` (PlannerPage owns scroll + header).
+- `Page` becomes `"home" | "chat" | "agents" | "notes" | "planner" | "presets" | "permissions" | "settings"` (this task removes `tasks`/`applications`/`review`).
+
+- [ ] **Step 1: Split TasksTab / CalendarTab**
+
+In the moved `TasksTab.tsx`:
+- Rename the export to `TasksTab`; delete the outer `<div className="h-full overflow-y-auto p-6">`/`max-w-3xl` wrapper and `<header>` — return a `<div className="flex flex-col gap-6">` containing error line, `QuickAdd`, `FilterChips`, `TaskList`.
+- Move `WeekEvents` (lines 223–268) and `CoursesPanel` (lines 270–415) plus their imports (`listEventsBetween`, `coursesRepo`, `importClassSchedule`, `Upload`, `Card*`) into the new `CalendarTab.tsx`:
+
+```tsx
+export function CalendarTab() {
+    const [courses, setCourses] = useState<Course[]>([]);
+    const [events, setEvents] = useState<CalendarEvent[]>([]);
     const [error, setError] = useState<string | null>(null);
 
     const reload = useCallback(async () => {
-        setAgents(await agentsRepo.listAgents());
+        setCourses(await coursesRepo.listCourses());
+        setEvents(await listEventsBetween(Date.now(), Date.now() + 7 * DAY));
     }, []);
     useEffect(() => {
         void reload();
     }, [reload]);
-
-    const network = useMemo(() => buildAgentTypeNetwork(agents), [agents]);
 
     const act = async (fn: () => Promise<unknown>) => {
         setError(null);
@@ -1793,2738 +1398,1004 @@ function RosterTab() {
 
     return (
         <div className="flex flex-col gap-6">
-            <div className="flex justify-center">
-                <NetworkSphere
-                    nodes={network.nodes}
-                    edges={network.edges}
-                    size={320}
-                    onSelect={(node) => {
-                        const agent = (
-                            node.payload as { agent?: string } | undefined
-                        )?.agent;
-                        if (!agent) return;
-                        setSelected(agent);
-                        document
-                            .getElementById(`agent-card-${agent}`)
-                            ?.scrollIntoView({
-                                behavior: "smooth",
-                                block: "center",
-                            });
-                    }}
-                />
-            </div>
             {error && <p className="text-xs text-destructive">{error}</p>}
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                {agents.map((a) => {
-                    const color = a.color ?? agentColor(agentSlug(a.name));
-                    return (
-                        <Card
-                            key={a.id}
-                            id={`agent-card-${a.id}`}
-                            style={{
-                                borderLeft: `2px solid ${color}`,
-                                boxShadow:
-                                    selected === a.id
-                                        ? `0 0 0 1px ${color}`
-                                        : undefined,
-                            }}
-                        >
-                            <CardHeader className="flex-row items-center gap-2">
-                                <CardTitle className="flex-1 text-sm">
-                                    {a.name}
-                                </CardTitle>
-                                {a.is_builtin === 1 && (
-                                    <Badge tone="primary">builtin</Badge>
-                                )}
-                                {a.model && (
-                                    <code className="font-mono text-[10px] text-muted-foreground">
-                                        {a.model}
-                                    </code>
-                                )}
-                                <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    aria-label={`Edit ${a.name}`}
-                                    onClick={() => setEditing(a)}
-                                >
-                                    <Pencil className="h-4 w-4" />
-                                </Button>
-                                <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    aria-label={`Duplicate ${a.name}`}
-                                    onClick={() =>
-                                        void act(() =>
-                                            agentsRepo.duplicateAgent(a.id),
-                                        )
-                                    }
-                                >
-                                    <Copy className="h-4 w-4" />
-                                </Button>
-                                {a.is_builtin === 0 && (
-                                    <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        aria-label={`Delete ${a.name}`}
-                                        onClick={() =>
-                                            void act(() =>
-                                                agentsRepo.deleteAgent(a.id),
-                                            )
-                                        }
-                                    >
-                                        <Trash2 className="h-4 w-4" />
-                                    </Button>
-                                )}
-                            </CardHeader>
-                            <CardContent className="flex flex-col gap-2">
-                                <p className="text-xs text-muted-foreground">
-                                    {a.description}
-                                </p>
-                                <div className="flex flex-wrap gap-1">
-                                    {agentToolNames(a).map((t) => (
-                                        <code
-                                            key={t}
-                                            className="rounded-sm bg-muted px-1.5 py-0.5 font-mono text-[10px] text-foreground/80"
-                                        >
-                                            {t}
-                                        </code>
-                                    ))}
-                                </div>
-                            </CardContent>
-                        </Card>
-                    );
-                })}
-            </div>
-            {editing ? (
-                <AgentEditor
-                    agent={editing === "new" ? null : editing}
-                    onDone={async () => {
-                        setEditing(null);
-                        await reload();
-                    }}
-                />
-            ) : (
-                <Button className="self-start" onClick={() => setEditing("new")}>
-                    New agent
-                </Button>
-            )}
+            <WeekEvents events={events} courses={courses} />
+            <CoursesPanel courses={courses} act={act} reload={reload} />
         </div>
     );
 }
 ```
 
-- [ ] **Step 3: Verify**
+- `TasksTab` keeps loading courses (QuickAdd's optional Course select + chips need them) but drops the events load.
+- Copy changes while splitting: `WeekEvents` empty text `"No events. Import a class schedule below."` → `"No events this week. Import a schedule below."`; `CoursesPanel` subtitle stays (it explains the folder-scope mechanic) but retitle the card `"Courses & schedules"`.
 
-Run: `npm run typecheck && npm test` — Expected: clean.
-Manual (`npm run dev`): create a "Summarizer" agent with `search_notes` + `write_note`; it appears on the sphere and in a preset's agent checkboxes; duplicate and delete work; builtin delete button absent.
+- [ ] **Step 2: Tab-ify Applications and Review**
 
-- [ ] **Step 4: Commit**
+In the moved `ApplicationsTab.tsx` / `ReviewTab.tsx`: rename exports to `ApplicationsTab` / `ReviewTab`, strip each file's outer scroll wrapper + `<header>` block (keep everything else byte-identical).
 
-```bash
-git add src/app/agents/
-git commit -m "feat: agents page tabs + roster CRUD editor"
-```
+- [ ] **Step 3: Create PlannerPage**
 
-### Task 8: agent test bench
-
-**Files:**
-- Create: `src/app/agents/AgentTestBench.tsx`
-- Modify: `src/app/agents/AgentsPage.tsx` (mount inside RosterTab, under the cards)
-
-**Interfaces:**
-- Consumes: `createAgentFromDef` (Task 5), `PermissionContext`, `ApprovalCards({ broker })`, `createModel`, `useRuntime()` for settings, `appFetch` (Task 6).
-- Produces: `AgentTestBench({ agents }: { agents: AgentDef[] })` — self-contained; nothing consumes it later.
-
-- [ ] **Step 1: Create `src/app/agents/AgentTestBench.tsx`**
-
-Runs one `generate` against the settings' default provider/models. Approvals flow through a bench-local `PermissionContext` (level = none → everything asks), rendered with the existing amber `ApprovalCards`.
-
-```tsx
-import { useMemo, useRef, useState } from "react";
-import { Play, Square } from "lucide-react";
-import { marked } from "marked";
-import { createModel, type ProviderId } from "@/ai/providers/registry";
-import { appFetch } from "@/ai/providers/appFetch";
-import { PermissionContext } from "@/ai/tools/context";
-import { createAgentFromDef } from "@/ai/agents/factory";
-import type { AgentRuntime, AgentUsageEvent } from "@/ai/agents/types";
-import { useRuntime } from "@/app/runtime";
-import { ApprovalCards } from "@/components/chat/ApprovalCard";
-import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/input";
-import { Select } from "@/components/ui/select";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import type { AgentDef } from "@/lib/schemas";
-
-export function AgentTestBench({ agents }: { agents: AgentDef[] }) {
-    const { settings } = useRuntime();
-    const [agentId, setAgentId] = useState("");
-    const [task, setTask] = useState("");
-    const [running, setRunning] = useState(false);
-    const [output, setOutput] = useState<string | null>(null);
-    const [usage, setUsage] = useState<AgentUsageEvent | null>(null);
-    const [error, setError] = useState<string | null>(null);
-    const abortRef = useRef<AbortController | null>(null);
-
-    // Fresh per mount; level-less → every tool call raises an approval card.
-    const permissions = useMemo(() => new PermissionContext(), []);
-
-    const run = async () => {
-        const def = agents.find((a) => a.id === agentId);
-        if (!def || !task.trim() || running) return;
-        setRunning(true);
-        setOutput(null);
-        setUsage(null);
-        setError(null);
-        const abort = new AbortController();
-        abortRef.current = abort;
-        try {
-            const provider = settings.defaultProvider as ProviderId;
-            const base = { settings, fetch: appFetch };
-            const runtime: AgentRuntime = {
-                permissions,
-                mainModel: createModel(
-                    { provider, modelId: settings.defaultModel },
-                    base,
-                ),
-                mainModelId: settings.defaultModel,
-                routerModel: createModel(
-                    { provider, modelId: settings.routerModel },
-                    base,
-                ),
-                routerModelId: settings.routerModel,
-                resolveModel: (modelId) =>
-                    createModel({ provider, modelId }, base),
-                fetch: appFetch,
-                onUsage: setUsage,
-            };
-            const { agent, modelId } = createAgentFromDef(def, runtime);
-            const result = await agent.generate({
-                prompt: task,
-                abortSignal: abort.signal,
-            });
-            runtime.onUsage?.({
-                agent: def.name,
-                model: modelId,
-                usage: result.totalUsage,
-            });
-            setOutput(result.text || "(no text returned)");
-        } catch (e) {
-            setError(e instanceof Error ? e.message : String(e));
-        } finally {
-            permissions.broker.denyAll();
-            abortRef.current = null;
-            setRunning(false);
-        }
-    };
-
-    const stop = () => {
-        permissions.broker.denyAll();
-        abortRef.current?.abort();
-    };
-
-    return (
-        <Card corners>
-            <CardHeader>
-                <CardTitle>Test bench</CardTitle>
-                <p className="text-xs text-muted-foreground">
-                    Run one task against an agent with your default models.
-                    Ungoverned by any level — every tool call asks.
-                </p>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-3">
-                <div className="flex gap-3">
-                    <Select
-                        aria-label="Agent under test"
-                        value={agentId}
-                        onChange={(e) => setAgentId(e.target.value)}
-                        className="w-56"
-                    >
-                        <option value="">Select agent…</option>
-                        {agents.map((a) => (
-                            <option key={a.id} value={a.id}>
-                                {a.name}
-                            </option>
-                        ))}
-                    </Select>
-                    {running ? (
-                        <Button variant="destructive" onClick={stop}>
-                            <Square className="mr-1 h-3.5 w-3.5" /> Stop
-                        </Button>
-                    ) : (
-                        <Button
-                            disabled={!agentId || !task.trim()}
-                            onClick={() => void run()}
-                        >
-                            <Play className="mr-1 h-3.5 w-3.5" /> Run
-                        </Button>
-                    )}
-                </div>
-                <Textarea
-                    rows={3}
-                    placeholder="Task for the agent — self-contained, it has no chat context."
-                    value={task}
-                    onChange={(e) => setTask(e.target.value)}
-                />
-                <ApprovalCards broker={permissions.broker} />
-                {running && (
-                    <p className="shimmer font-mono text-xs text-muted-foreground">
-                        running…
-                    </p>
-                )}
-                {error && (
-                    <p className="font-mono text-xs text-destructive">{error}</p>
-                )}
-                {output !== null && (
-                    <div
-                        className="prose prose-sm prose-invert max-w-none rounded-sm border border-border bg-background/60 p-3 text-sm"
-                        // Same rendering path as chat messages (marked).
-                        dangerouslySetInnerHTML={{
-                            __html: marked.parse(output, { async: false }),
-                        }}
-                    />
-                )}
-                {usage && (
-                    <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-                        {usage.model} · in{" "}
-                        {usage.usage.inputTokens?.total ?? "?"} · out{" "}
-                        {usage.usage.outputTokens?.total ?? "?"}
-                    </p>
-                )}
-            </CardContent>
-        </Card>
-    );
-}
-```
-
-> Two check-before-use notes for the implementer: (1) mirror how `MessageList.tsx` renders markdown (`marked` options/sanitization) instead of the `dangerouslySetInnerHTML` call above if it differs; (2) mirror `TokenMeter`/`tokens.ts` for the exact `LanguageModelUsage` field access if `inputTokens?.total` doesn't typecheck.
-
-- [ ] **Step 2: Mount it in `RosterTab`**
-
-At the end of `RosterTab`'s JSX (after the editor/new-agent button): `<AgentTestBench agents={agents} />` with the import added.
-
-- [ ] **Step 3: Verify**
-
-Run: `npm run typecheck && npm test` — Expected: clean.
-Manual: run the Knowledge agent with "list my notes" → amber approval card appears → allow once → output + usage line render; Stop mid-run aborts cleanly.
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add src/app/agents/
-git commit -m "feat: agent test bench with live approvals"
-```
----
-
-## Milestone C — Pipelines
-
-### Task 9: template renderer
-
-**Files:**
-- Create: `src/lib/template.ts`
-- Test: `src/lib/template.test.ts`
-
-**Interfaces:**
-- Produces: `renderTemplate(template: string, vars: Record<string, string>): string` — `{{key}}` substitution, throws on unknown keys. Runner (Task 11) and automations (Task 14) consume it.
-
-- [ ] **Step 1: Write the failing test**
-
-```ts
-// src/lib/template.test.ts
-import { describe, expect, it } from "vitest";
-import { renderTemplate } from "./template";
-
-describe("renderTemplate", () => {
-    it("substitutes variables with optional whitespace", () => {
-        expect(
-            renderTemplate("Summarize {{input}} on {{ date }}", {
-                input: "HN",
-                date: "2026-07-11",
-            }),
-        ).toBe("Summarize HN on 2026-07-11");
-    });
-
-    it("passes through text without placeholders", () => {
-        expect(renderTemplate("plain", {})).toBe("plain");
-    });
-
-    it("throws on unknown variables (fail fast, no silent blanks)", () => {
-        expect(() => renderTemplate("{{step9}}", { input: "x" })).toThrow(
-            /unknown template variable.*step9/,
-        );
-    });
-});
-```
-
-- [ ] **Step 2: Run to verify failure**
-
-Run: `npx vitest run src/lib/template.test.ts`
-Expected: FAIL — module `./template` not found.
-
-- [ ] **Step 3: Implement `src/lib/template.ts`**
-
-```ts
-const PLACEHOLDER = /\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g;
-
-/**
- * Minimal {{var}} templating for pipeline prompts. Unknown variables throw:
- * a typo'd {{step3}} must fail the run, not silently inject an empty string.
- */
-export function renderTemplate(
-    template: string,
-    vars: Record<string, string>,
-): string {
-    return template.replace(PLACEHOLDER, (_, key: string) => {
-        const value = vars[key];
-        if (value === undefined)
-            throw new Error(`unknown template variable: {{${key}}}`);
-        return value;
-    });
-}
-```
-
-- [ ] **Step 4: Run tests, typecheck, commit**
-
-Run: `npx vitest run src/lib/template.test.ts && npm run typecheck` — Expected: PASS/clean.
-
-```bash
-git add src/lib/template.ts src/lib/template.test.ts
-git commit -m "feat: renderTemplate for pipeline prompt variables"
-```
-
-### Task 10: pipelines migration + repository
-
-**Files:**
-- Create: `src-tauri/migrations/0004_pipelines.sql`, `src/db/repo/pipelines.ts`
-- Modify: `src-tauri/src/lib.rs`, `src/lib/schemas.ts`
-- Test: `src/db/repo/pipelines.test.ts`
-
-**Interfaces:**
-- Produces (schemas): `pipelineSchema/Pipeline`, `pipelineStepSchema/PipelineStep`, `pipelineRunSchema/PipelineRun` (status `"running"|"success"|"error"`), `pipelineStepRunSchema/PipelineStepRun` (status `"running"|"success"|"error"`).
-- Produces (repo): `createPipeline({name, description?})`, `updatePipeline(id, {name, description?})`, `deletePipeline(id)`, `getPipeline(id)`, `listPipelines()`, `setPipelineSteps(pipelineId, steps: {agentId: string; promptTemplate: string}[])`, `listPipelineSteps(pipelineId)` (ordered by position, 1-based), `createRun({pipelineId, automationId?, input})`, `finishRun(id, {status, error?})`, `createStepRun({runId, position, agentId, prompt})`, `finishStepRun(id, {status, output?, error?})`, `listRuns(opts?: {pipelineId?: string; automationId?: string; limit?: number})` (newest first), `listStepRuns(runId)`.
-
-- [ ] **Step 1: Write the migration `src-tauri/migrations/0004_pipelines.sql`**
-
-```sql
--- Pipelines: ordered agent steps + persisted run history.
--- automation_id is plain TEXT (no FK): automations arrive in migration 0005.
-
-CREATE TABLE pipelines (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL UNIQUE,
-    description TEXT,
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
-);
-
-CREATE TABLE pipeline_steps (
-    id TEXT PRIMARY KEY,
-    pipeline_id TEXT NOT NULL REFERENCES pipelines(id) ON DELETE CASCADE,
-    position INTEGER NOT NULL,
-    agent_id TEXT NOT NULL REFERENCES agents(id),
-    prompt_template TEXT NOT NULL
-);
-CREATE INDEX idx_pipeline_steps ON pipeline_steps(pipeline_id, position);
-
-CREATE TABLE pipeline_runs (
-    id TEXT PRIMARY KEY,
-    pipeline_id TEXT NOT NULL REFERENCES pipelines(id) ON DELETE CASCADE,
-    automation_id TEXT,
-    status TEXT NOT NULL CHECK (status IN ('running', 'success', 'error')),
-    input TEXT NOT NULL DEFAULT '',
-    error TEXT,
-    started_at INTEGER NOT NULL,
-    finished_at INTEGER
-);
-CREATE INDEX idx_pipeline_runs ON pipeline_runs(pipeline_id, started_at);
-
-CREATE TABLE pipeline_step_runs (
-    id TEXT PRIMARY KEY,
-    run_id TEXT NOT NULL REFERENCES pipeline_runs(id) ON DELETE CASCADE,
-    position INTEGER NOT NULL,
-    agent_id TEXT NOT NULL,
-    prompt TEXT NOT NULL,
-    output TEXT,
-    status TEXT NOT NULL CHECK (status IN ('running', 'success', 'error')),
-    error TEXT,
-    started_at INTEGER NOT NULL,
-    finished_at INTEGER
-);
-CREATE INDEX idx_pipeline_step_runs ON pipeline_step_runs(run_id, position);
-```
-
-Register in `src-tauri/src/lib.rs`:
-
-```rust
-Migration {
-    version: 4,
-    description: "pipelines, steps, run history",
-    sql: include_str!("../migrations/0004_pipelines.sql"),
-    kind: MigrationKind::Up,
-},
-```
-
-- [ ] **Step 2: Add schemas to `src/lib/schemas.ts`**
-
-```ts
-export const pipelineSchema = z.object({
-    id: z.string(),
-    name: z.string(),
-    description: z.string().nullable(),
-    created_at: z.number(),
-    updated_at: z.number(),
-});
-export type Pipeline = z.infer<typeof pipelineSchema>;
-
-export const pipelineStepSchema = z.object({
-    id: z.string(),
-    pipeline_id: z.string(),
-    position: z.number(),
-    agent_id: z.string(),
-    prompt_template: z.string(),
-});
-export type PipelineStep = z.infer<typeof pipelineStepSchema>;
-
-export const runStatusSchema = z.enum(["running", "success", "error"]);
-export type RunStatus = z.infer<typeof runStatusSchema>;
-
-export const pipelineRunSchema = z.object({
-    id: z.string(),
-    pipeline_id: z.string(),
-    automation_id: z.string().nullable(),
-    status: runStatusSchema,
-    input: z.string(),
-    error: z.string().nullable(),
-    started_at: z.number(),
-    finished_at: z.number().nullable(),
-});
-export type PipelineRun = z.infer<typeof pipelineRunSchema>;
-
-export const pipelineStepRunSchema = z.object({
-    id: z.string(),
-    run_id: z.string(),
-    position: z.number(),
-    agent_id: z.string(),
-    prompt: z.string(),
-    output: z.string().nullable(),
-    status: runStatusSchema,
-    error: z.string().nullable(),
-    started_at: z.number(),
-    finished_at: z.number().nullable(),
-});
-export type PipelineStepRun = z.infer<typeof pipelineStepRunSchema>;
-```
-
-- [ ] **Step 3: Write the failing repo test**
-
-```ts
-// src/db/repo/pipelines.test.ts
-import { beforeEach, afterEach, describe, expect, it } from "vitest";
-import { createTestDbClient } from "@/db/testClient";
-import { setDb } from "@/db/client";
-import { seedBuiltinAgents, BUILTIN_AGENT_IDS } from "./agents";
-import {
-    createPipeline,
-    createRun,
-    createStepRun,
-    deletePipeline,
-    finishRun,
-    finishStepRun,
-    listPipelineSteps,
-    listPipelines,
-    listRuns,
-    listStepRuns,
-    setPipelineSteps,
-} from "./pipelines";
-
-let db: ReturnType<typeof createTestDbClient>;
-
-beforeEach(async () => {
-    db = createTestDbClient();
-    setDb(db);
-    await seedBuiltinAgents();
-});
-
-afterEach(() => db.close());
-
-describe("pipelines repo", () => {
-    it("creates a pipeline and replaces its steps atomically-enough", async () => {
-        const p = await createPipeline({ name: "Digest" });
-        await setPipelineSteps(p.id, [
-            {
-                agentId: BUILTIN_AGENT_IDS.research,
-                promptTemplate: "Read {{input}}",
-            },
-            {
-                agentId: BUILTIN_AGENT_IDS.knowledge,
-                promptTemplate: "Relate to my notes: {{prev}}",
-            },
-        ]);
-        let steps = await listPipelineSteps(p.id);
-        expect(steps.map((s) => s.position)).toEqual([1, 2]);
-
-        await setPipelineSteps(p.id, [
-            {
-                agentId: BUILTIN_AGENT_IDS.knowledge,
-                promptTemplate: "only step {{input}}",
-            },
-        ]);
-        steps = await listPipelineSteps(p.id);
-        expect(steps).toHaveLength(1);
-        expect(steps[0]!.position).toBe(1);
-    });
-
-    it("persists run and step-run lifecycles", async () => {
-        const p = await createPipeline({ name: "R" });
-        const run = await createRun({ pipelineId: p.id, input: "go" });
-        expect(run.status).toBe("running");
-
-        const sr = await createStepRun({
-            runId: run.id,
-            position: 1,
-            agentId: BUILTIN_AGENT_IDS.research,
-            prompt: "Read go",
-        });
-        await finishStepRun(sr.id, { status: "success", output: "done" });
-        await finishRun(run.id, { status: "success" });
-
-        const runs = await listRuns({ pipelineId: p.id });
-        expect(runs[0]!.status).toBe("success");
-        expect(runs[0]!.finished_at).not.toBeNull();
-        const stepRuns = await listStepRuns(run.id);
-        expect(stepRuns[0]!.output).toBe("done");
-    });
-
-    it("cascades runs and steps on pipeline delete", async () => {
-        const p = await createPipeline({ name: "X" });
-        const run = await createRun({ pipelineId: p.id, input: "" });
-        await deletePipeline(p.id);
-        expect(await listPipelines()).toHaveLength(0);
-        expect(await listStepRuns(run.id)).toHaveLength(0);
-        expect(await listRuns({})).toHaveLength(0);
-    });
-});
-```
-
-Run: `npx vitest run src/db/repo/pipelines.test.ts` — Expected: FAIL (module not found).
-
-- [ ] **Step 4: Implement `src/db/repo/pipelines.ts`**
-
-```ts
-import { getDb } from "../client";
-import { newId, now } from "@/lib/ids";
-import {
-    pipelineRunSchema,
-    pipelineSchema,
-    pipelineStepRunSchema,
-    pipelineStepSchema,
-    type Pipeline,
-    type PipelineRun,
-    type PipelineStep,
-    type PipelineStepRun,
-    type RunStatus,
-} from "@/lib/schemas";
-
-export async function createPipeline(input: {
-    name: string;
-    description?: string | null;
-}): Promise<Pipeline> {
-    const id = newId("pip");
-    const t = now();
-    await getDb().execute(
-        `INSERT INTO pipelines (id, name, description, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?)`,
-        [id, input.name, input.description ?? null, t, t],
-    );
-    return getPipeline(id);
-}
-
-export async function updatePipeline(
-    id: string,
-    input: { name: string; description?: string | null },
-): Promise<Pipeline> {
-    const res = await getDb().execute(
-        "UPDATE pipelines SET name = ?, description = ?, updated_at = ? WHERE id = ?",
-        [input.name, input.description ?? null, now(), id],
-    );
-    if (res.rowsAffected === 0) throw new Error(`pipeline not found: ${id}`);
-    return getPipeline(id);
-}
-
-export async function getPipeline(id: string): Promise<Pipeline> {
-    const rows = await getDb().select(
-        "SELECT * FROM pipelines WHERE id = ?",
-        [id],
-    );
-    if (!rows[0]) throw new Error(`pipeline not found: ${id}`);
-    return pipelineSchema.parse(rows[0]);
-}
-
-export async function listPipelines(): Promise<Pipeline[]> {
-    const rows = await getDb().select(
-        "SELECT * FROM pipelines ORDER BY created_at ASC",
-    );
-    return rows.map((r) => pipelineSchema.parse(r));
-}
-
-export async function deletePipeline(id: string): Promise<void> {
-    await getDb().execute("DELETE FROM pipelines WHERE id = ?", [id]);
-}
-
-/**
- * Replace all steps (delete + insert, positions 1..N). Two statements, no
- * transaction: single local writer; a failure surfaces immediately in the UI.
- */
-export async function setPipelineSteps(
-    pipelineId: string,
-    steps: { agentId: string; promptTemplate: string }[],
-): Promise<void> {
-    await getDb().execute(
-        "DELETE FROM pipeline_steps WHERE pipeline_id = ?",
-        [pipelineId],
-    );
-    for (const [i, step] of steps.entries()) {
-        await getDb().execute(
-            `INSERT INTO pipeline_steps (id, pipeline_id, position, agent_id, prompt_template)
-             VALUES (?, ?, ?, ?, ?)`,
-            [newId("pst"), pipelineId, i + 1, step.agentId, step.promptTemplate],
-        );
-    }
-    await getDb().execute(
-        "UPDATE pipelines SET updated_at = ? WHERE id = ?",
-        [now(), pipelineId],
-    );
-}
-
-export async function listPipelineSteps(
-    pipelineId: string,
-): Promise<PipelineStep[]> {
-    const rows = await getDb().select(
-        "SELECT * FROM pipeline_steps WHERE pipeline_id = ? ORDER BY position ASC",
-        [pipelineId],
-    );
-    return rows.map((r) => pipelineStepSchema.parse(r));
-}
-
-export async function createRun(input: {
-    pipelineId: string;
-    automationId?: string | null;
-    input: string;
-}): Promise<PipelineRun> {
-    const id = newId("run");
-    await getDb().execute(
-        `INSERT INTO pipeline_runs (id, pipeline_id, automation_id, status, input, started_at)
-         VALUES (?, ?, ?, 'running', ?, ?)`,
-        [id, input.pipelineId, input.automationId ?? null, input.input, now()],
-    );
-    return getRun(id);
-}
-
-export async function getRun(id: string): Promise<PipelineRun> {
-    const rows = await getDb().select(
-        "SELECT * FROM pipeline_runs WHERE id = ?",
-        [id],
-    );
-    if (!rows[0]) throw new Error(`pipeline run not found: ${id}`);
-    return pipelineRunSchema.parse(rows[0]);
-}
-
-export async function finishRun(
-    id: string,
-    result: { status: Exclude<RunStatus, "running">; error?: string | null },
-): Promise<void> {
-    await getDb().execute(
-        "UPDATE pipeline_runs SET status = ?, error = ?, finished_at = ? WHERE id = ?",
-        [result.status, result.error ?? null, now(), id],
-    );
-}
-
-export async function listRuns(
-    opts: { pipelineId?: string; automationId?: string; limit?: number } = {},
-): Promise<PipelineRun[]> {
-    const where: string[] = [];
-    const params: unknown[] = [];
-    if (opts.pipelineId) {
-        where.push("pipeline_id = ?");
-        params.push(opts.pipelineId);
-    }
-    if (opts.automationId) {
-        where.push("automation_id = ?");
-        params.push(opts.automationId);
-    }
-    params.push(opts.limit ?? 20);
-    const rows = await getDb().select(
-        `SELECT * FROM pipeline_runs
-         ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
-         ORDER BY started_at DESC LIMIT ?`,
-        params,
-    );
-    return rows.map((r) => pipelineRunSchema.parse(r));
-}
-
-export async function createStepRun(input: {
-    runId: string;
-    position: number;
-    agentId: string;
-    prompt: string;
-}): Promise<PipelineStepRun> {
-    const id = newId("srn");
-    await getDb().execute(
-        `INSERT INTO pipeline_step_runs (id, run_id, position, agent_id, prompt, status, started_at)
-         VALUES (?, ?, ?, ?, ?, 'running', ?)`,
-        [id, input.runId, input.position, input.agentId, input.prompt, now()],
-    );
-    const rows = await getDb().select(
-        "SELECT * FROM pipeline_step_runs WHERE id = ?",
-        [id],
-    );
-    return pipelineStepRunSchema.parse(rows[0]);
-}
-
-export async function finishStepRun(
-    id: string,
-    result: {
-        status: Exclude<RunStatus, "running">;
-        output?: string | null;
-        error?: string | null;
-    },
-): Promise<void> {
-    await getDb().execute(
-        `UPDATE pipeline_step_runs SET status = ?, output = ?, error = ?, finished_at = ?
-         WHERE id = ?`,
-        [result.status, result.output ?? null, result.error ?? null, now(), id],
-    );
-}
-
-export async function listStepRuns(runId: string): Promise<PipelineStepRun[]> {
-    const rows = await getDb().select(
-        "SELECT * FROM pipeline_step_runs WHERE run_id = ? ORDER BY position ASC",
-        [runId],
-    );
-    return rows.map((r) => pipelineStepRunSchema.parse(r));
-}
-```
-
-- [ ] **Step 5: Run tests, typecheck, commit**
-
-Run: `npx vitest run src/db/repo/pipelines.test.ts && npm run typecheck` — Expected: PASS/clean.
-
-```bash
-git add src-tauri/migrations/0004_pipelines.sql src-tauri/src/lib.rs src/lib/schemas.ts src/db/repo/pipelines.ts src/db/repo/pipelines.test.ts
-git commit -m "feat: pipelines schema + repository with run history"
-```
-
-### Task 11: pipeline runner
-
-**Files:**
-- Create: `src/ai/pipelines/runner.ts`
-- Test: `src/ai/pipelines/runner.test.ts`
-
-**Interfaces:**
-- Consumes: pipelines repo (Task 10), `getAgent` (Task 2), `createAgentFromDef` (Task 5), `renderTemplate` (Task 9), `agentSlug`.
-- Produces: `runPipeline(opts: { pipelineId: string; input: string; runtime: AgentRuntime; automationId?: string; abortSignal?: AbortSignal; onProgress?: () => void }): Promise<{ runId: string; status: "success" | "error"; finalOutput: string }>`. Template vars per step: `input`, `date`, `prev`, `step1…stepN` (outputs of finished steps).
-
-- [ ] **Step 1: Write the failing test**
-
-```ts
-// src/ai/pipelines/runner.test.ts
-import { beforeEach, afterEach, describe, expect, it } from "vitest";
-import { MockLanguageModelV3 } from "ai/test";
-import type { LanguageModelV3GenerateResult } from "@ai-sdk/provider";
-import { createTestDbClient } from "@/db/testClient";
-import { setDb } from "@/db/client";
-import { createAgent } from "@/db/repo/agents";
-import {
-    createPipeline,
-    listRuns,
-    listStepRuns,
-    setPipelineSteps,
-} from "@/db/repo/pipelines";
-import { PermissionContext } from "@/ai/tools/context";
-import type { AgentRuntime } from "@/ai/agents/types";
-import { runPipeline } from "./runner";
-
-let db: ReturnType<typeof createTestDbClient>;
-
-beforeEach(() => {
-    db = createTestDbClient();
-    setDb(db);
-});
-afterEach(() => db.close());
-
-const usage = {
-    inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
-    outputTokens: { total: 5, text: 5, reasoning: 0 },
-};
-const text = (t: string): LanguageModelV3GenerateResult => ({
-    content: [{ type: "text" as const, text: t }],
-    finishReason: { unified: "stop" as const, raw: undefined },
-    usage,
-    warnings: [],
-});
-
-function runtimeWith(model: MockLanguageModelV3): AgentRuntime {
-    return {
-        permissions: new PermissionContext(),
-        mainModel: model,
-        mainModelId: "mock-main",
-        routerModel: model,
-        routerModelId: "mock-main",
-        resolveModel: () => model,
-        fetch: async () => new Response("stub"),
-    };
-}
-
-async function twoStepPipeline() {
-    const a = await createAgent({
-        name: "Reader",
-        description: "reads",
-        instructions: "Read.",
-        tools: [],
-    });
-    const b = await createAgent({
-        name: "Writer",
-        description: "writes",
-        instructions: "Write.",
-        tools: [],
-    });
-    const p = await createPipeline({ name: "Digest" });
-    await setPipelineSteps(p.id, [
-        { agentId: a.id, promptTemplate: "Read {{input}}" },
-        { agentId: b.id, promptTemplate: "Summarize: {{prev}}" },
-    ]);
-    return p;
-}
-
-describe("runPipeline", () => {
-    it("chains step outputs and persists the run", async () => {
-        const p = await twoStepPipeline();
-        const model = new MockLanguageModelV3({
-            doGenerate: [text("PAGE CONTENT"), text("THE SUMMARY")],
-        });
-
-        const result = await runPipeline({
-            pipelineId: p.id,
-            input: "hn.example",
-            runtime: runtimeWith(model),
-        });
-
-        expect(result.status).toBe("success");
-        expect(result.finalOutput).toBe("THE SUMMARY");
-        // Step 2's prompt saw step 1's output via {{prev}}.
-        expect(
-            JSON.stringify(model.doGenerateCalls[1]?.prompt),
-        ).toContain("Summarize: PAGE CONTENT");
-
-        const runs = await listRuns({ pipelineId: p.id });
-        expect(runs[0]!.status).toBe("success");
-        const steps = await listStepRuns(result.runId);
-        expect(steps.map((s) => s.status)).toEqual(["success", "success"]);
-        expect(steps[1]!.output).toBe("THE SUMMARY");
-    });
-
-    it("marks the run failed when a step throws and stops there", async () => {
-        const p = await twoStepPipeline();
-        const model = new MockLanguageModelV3({
-            doGenerate: () => {
-                throw new Error("model exploded");
-            },
-        });
-
-        const result = await runPipeline({
-            pipelineId: p.id,
-            input: "x",
-            runtime: runtimeWith(model),
-        });
-
-        expect(result.status).toBe("error");
-        const runs = await listRuns({ pipelineId: p.id });
-        expect(runs[0]!.status).toBe("error");
-        expect(runs[0]!.error).toContain("step 1");
-        const steps = await listStepRuns(result.runId);
-        expect(steps).toHaveLength(1);
-        expect(steps[0]!.status).toBe("error");
-    });
-
-    it("throws before creating a run when the pipeline has no steps", async () => {
-        const p = await createPipeline({ name: "Empty" });
-        await expect(
-            runPipeline({
-                pipelineId: p.id,
-                input: "",
-                runtime: runtimeWith(new MockLanguageModelV3({})),
-            }),
-        ).rejects.toThrow(/no steps/);
-        expect(await listRuns({ pipelineId: p.id })).toHaveLength(0);
-    });
-});
-```
-
-- [ ] **Step 2: Run to verify failure**
-
-Run: `npx vitest run src/ai/pipelines/runner.test.ts`
-Expected: FAIL — module `./runner` not found.
-
-- [ ] **Step 3: Implement `src/ai/pipelines/runner.ts`**
-
-```ts
-import { getAgent } from "@/db/repo/agents";
-import {
-    createRun,
-    createStepRun,
-    finishRun,
-    finishStepRun,
-    listPipelineSteps,
-} from "@/db/repo/pipelines";
-import { createAgentFromDef } from "@/ai/agents/factory";
-import type { AgentRuntime } from "@/ai/agents/types";
-import { renderTemplate } from "@/lib/template";
-import { agentSlug } from "@/lib/schemas";
-
-export interface PipelineRunResult {
-    runId: string;
-    status: "success" | "error";
-    finalOutput: string;
-}
-
-/**
- * Executes a pipeline's steps sequentially. Each step renders its prompt
- * template ({{input}}, {{date}}, {{prev}}, {{stepN}}), runs its agent, and
- * persists a step-run row. The first failure ends the run as 'error' — later
- * steps depend on earlier output, so continuing would compound garbage.
- */
-export async function runPipeline(opts: {
-    pipelineId: string;
-    input: string;
-    runtime: AgentRuntime;
-    automationId?: string;
-    abortSignal?: AbortSignal;
-    /** Fired after every persisted change so the UI can refresh run rows. */
-    onProgress?: () => void;
-}): Promise<PipelineRunResult> {
-    const steps = await listPipelineSteps(opts.pipelineId);
-    if (steps.length === 0)
-        throw new Error(`pipeline has no steps: ${opts.pipelineId}`);
-
-    const run = await createRun({
-        pipelineId: opts.pipelineId,
-        automationId: opts.automationId ?? null,
-        input: opts.input,
-    });
-    opts.onProgress?.();
-
-    const vars: Record<string, string> = {
-        input: opts.input,
-        date: new Date().toISOString().slice(0, 10),
-        prev: opts.input,
-    };
-    let finalOutput = "";
-
-    for (const step of steps) {
-        let stepRunId: string | null = null;
-        try {
-            const def = await getAgent(step.agent_id);
-            const prompt = renderTemplate(step.prompt_template, vars);
-            const stepRun = await createStepRun({
-                runId: run.id,
-                position: step.position,
-                agentId: def.id,
-                prompt,
-            });
-            stepRunId = stepRun.id;
-            opts.onProgress?.();
-
-            const { agent, modelId } = createAgentFromDef(def, opts.runtime);
-            const result = await agent.generate({
-                prompt,
-                abortSignal: opts.abortSignal,
-            });
-            opts.runtime.onUsage?.({
-                agent: agentSlug(def.name),
-                model: modelId,
-                usage: result.totalUsage,
-            });
-
-            const output = result.text || "(the agent returned no text)";
-            await finishStepRun(stepRun.id, { status: "success", output });
-            vars[`step${step.position}`] = output;
-            vars.prev = output;
-            finalOutput = output;
-            opts.onProgress?.();
-        } catch (e) {
-            const message = e instanceof Error ? e.message : String(e);
-            if (stepRunId)
-                await finishStepRun(stepRunId, {
-                    status: "error",
-                    error: message,
-                });
-            await finishRun(run.id, {
-                status: "error",
-                error: `step ${step.position}: ${message}`,
-            });
-            opts.onProgress?.();
-            return { runId: run.id, status: "error", finalOutput };
-        }
-    }
-
-    await finishRun(run.id, { status: "success" });
-    opts.onProgress?.();
-    return { runId: run.id, status: "success", finalOutput };
-}
-```
-
-- [ ] **Step 4: Run tests, typecheck, commit**
-
-Run: `npx vitest run src/ai/pipelines/runner.test.ts && npm test && npm run typecheck` — Expected: PASS/clean.
-
-```bash
-git add src/ai/pipelines/
-git commit -m "feat: sequential pipeline runner with persisted step history"
-```
-
-### Task 12: Pipelines tab UI
-
-**Files:**
-- Create: `src/app/agents/PipelinesTab.tsx`, `src/app/agents/RunHistory.tsx`
-- Modify: `src/app/agents/AgentsPage.tsx` (replace `PipelinesPlaceholder`)
-- Modify: `src/ai/agents/runtime.ts` (add `buildPipelineRuntime`)
-
-**Interfaces:**
-- Consumes: pipelines repo, `runPipeline`, agents repo, `ApprovalCards`, `useRuntime()`, `appFetch`, permission levels (`listLevels`, `listGrants` via `applyPermissionLevel`).
-- Produces: `buildPipelineRuntime({ settings, fetch, permissions, onUsage? }): AgentRuntime` (settings-default models; also used by Task 14); `RunHistory({ runs })` (also used by Task 15); `PipelinesTab()`.
-
-- [ ] **Step 1: Add `buildPipelineRuntime` to `src/ai/agents/runtime.ts`**
-
-```ts
-/**
- * Runtime for pipeline/automation runs — no preset involved: models come from
- * the settings defaults; per-agent overrides still apply via resolveModel.
- */
-export function buildPipelineRuntime(opts: {
-    settings: Settings;
-    fetch: typeof globalThis.fetch;
-    permissions: PermissionContext;
-    onUsage?: (event: AgentUsageEvent) => void;
-}): AgentRuntime {
-    const provider = opts.settings.defaultProvider as ProviderId;
-    const base = { settings: opts.settings, fetch: opts.fetch };
-    return {
-        permissions: opts.permissions,
-        mainModel: createModel(
-            { provider, modelId: opts.settings.defaultModel },
-            base,
-        ),
-        mainModelId: opts.settings.defaultModel,
-        routerModel: createModel(
-            { provider, modelId: opts.settings.routerModel },
-            base,
-        ),
-        routerModelId: opts.settings.routerModel,
-        resolveModel: (modelId) => createModel({ provider, modelId }, base),
-        fetch: opts.fetch,
-        onUsage: opts.onUsage,
-    };
-}
-```
-
-(Reuses the file's existing imports; add any missing type imports.)
-
-- [ ] **Step 2: Create `src/app/agents/RunHistory.tsx`**
+`src/app/planner/PlannerPage.tsx`:
 
 ```tsx
 import { useEffect, useState } from "react";
-import { ChevronDown, ChevronRight } from "lucide-react";
-import { listStepRuns } from "@/db/repo/pipelines";
-import type { PipelineRun, PipelineStepRun, RunStatus } from "@/lib/schemas";
-import { Badge } from "@/components/ui/badge";
+import { TabBar } from "@/components/ui/tabs";
+import { TasksTab } from "./TasksTab";
+import { CalendarTab } from "./CalendarTab";
+import { ApplicationsTab } from "./ApplicationsTab";
+import { ReviewTab } from "./ReviewTab";
 
-const TONE: Record<RunStatus, "primary" | "success" | "destructive"> = {
-    running: "primary",
-    success: "success",
-    error: "destructive",
-};
+type PlannerTab = "tasks" | "calendar" | "applications" | "review";
+const TABS: { id: PlannerTab; label: string }[] = [
+    { id: "tasks", label: "Tasks" },
+    { id: "calendar", label: "Calendar" },
+    { id: "applications", label: "Applications" },
+    { id: "review", label: "Review" },
+];
+const isTab = (t: string | undefined): t is PlannerTab =>
+    TABS.some((x) => x.id === t);
 
-export function RunHistory({ runs }: { runs: PipelineRun[] }) {
-    if (runs.length === 0)
-        return <p className="text-xs text-muted-foreground">No runs yet.</p>;
-    return (
-        <div className="flex flex-col gap-1.5">
-            {runs.map((run) => (
-                <RunRow key={run.id} run={run} />
-            ))}
-        </div>
-    );
-}
-
-function RunRow({ run }: { run: PipelineRun }) {
-    const [open, setOpen] = useState(false);
-    const [steps, setSteps] = useState<PipelineStepRun[]>([]);
-
+export function PlannerPage({ tab }: { tab?: string }) {
+    const [active, setActive] = useState<PlannerTab>(isTab(tab) ? tab : "tasks");
     useEffect(() => {
-        if (open) void listStepRuns(run.id).then(setSteps);
-    }, [open, run.id, run.status]);
-
-    const Chevron = open ? ChevronDown : ChevronRight;
-    return (
-        <div className="rounded-md border border-border bg-card/60">
-            <button
-                onClick={() => setOpen((o) => !o)}
-                className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left focus-visible:outline-2 focus-visible:outline-ring"
-            >
-                <Chevron aria-hidden className="h-3.5 w-3.5 shrink-0" />
-                <Badge tone={TONE[run.status]}>{run.status}</Badge>
-                <span className="flex-1 truncate font-mono text-xs text-muted-foreground">
-                    {run.input || "(no input)"}
-                </span>
-                <span className="font-mono text-[10px] text-muted-foreground">
-                    {new Date(run.started_at).toLocaleString()}
-                </span>
-            </button>
-            {open && (
-                <div className="flex flex-col gap-2 border-t border-border p-3">
-                    {run.error && (
-                        <p className="font-mono text-xs text-destructive">
-                            {run.error}
-                        </p>
-                    )}
-                    {steps.map((s) => (
-                        <div key={s.id} className="flex flex-col gap-1">
-                            <div className="flex items-center gap-2">
-                                <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-                                    step {s.position}
-                                </span>
-                                <Badge tone={TONE[s.status]}>{s.status}</Badge>
-                            </div>
-                            <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded-sm border border-border bg-background/60 p-2 font-mono text-xs">
-                                {s.output ?? s.error ?? s.prompt}
-                            </pre>
-                        </div>
-                    ))}
-                </div>
-            )}
-        </div>
-    );
-}
-```
-
-- [ ] **Step 3: Create `src/app/agents/PipelinesTab.tsx`**
-
-```tsx
-import { useCallback, useEffect, useState } from "react";
-import { Pencil, Play, Plus, Trash2 } from "lucide-react";
-import * as pipelinesRepo from "@/db/repo/pipelines";
-import { listAgents } from "@/db/repo/agents";
-import { listLevels, listGrants } from "@/db/repo/permissions";
-import { toScopedGrant } from "@/ai/permissions/engine";
-import { PermissionContext } from "@/ai/tools/context";
-import { buildPipelineRuntime } from "@/ai/agents/runtime";
-import { runPipeline } from "@/ai/pipelines/runner";
-import { appFetch } from "@/ai/providers/appFetch";
-import { useRuntime } from "@/app/runtime";
-import { ApprovalCards } from "@/components/chat/ApprovalCard";
-import { Button } from "@/components/ui/button";
-import { Input, Textarea } from "@/components/ui/input";
-import { Select } from "@/components/ui/select";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import type {
-    AgentDef,
-    PermissionLevel,
-    Pipeline,
-    PipelineRun,
-    PipelineStep,
-} from "@/lib/schemas";
-import { RunHistory } from "./RunHistory";
-
-interface StepDraft {
-    agentId: string;
-    promptTemplate: string;
-}
-
-export function PipelinesTab() {
-    const { settings } = useRuntime();
-    const [pipelines, setPipelines] = useState<Pipeline[]>([]);
-    const [agents, setAgents] = useState<AgentDef[]>([]);
-    const [levels, setLevels] = useState<PermissionLevel[]>([]);
-    const [editing, setEditing] = useState<Pipeline | "new" | null>(null);
-    const [runsFor, setRunsFor] = useState<string | null>(null);
-    const [runs, setRuns] = useState<PipelineRun[]>([]);
-    const [runInput, setRunInput] = useState("");
-    const [levelId, setLevelId] = useState("");
-    const [running, setRunning] = useState<string | null>(null);
-    const [permissions, setPermissions] = useState<PermissionContext | null>(
-        null,
-    );
-    const [error, setError] = useState<string | null>(null);
-
-    const reload = useCallback(async () => {
-        setPipelines(await pipelinesRepo.listPipelines());
-        setAgents(await listAgents());
-        setLevels(await listLevels());
-    }, []);
-    useEffect(() => {
-        void reload();
-    }, [reload]);
-
-    const refreshRuns = useCallback(async (pipelineId: string) => {
-        setRunsFor(pipelineId);
-        setRuns(await pipelinesRepo.listRuns({ pipelineId }));
-    }, []);
-
-    const runNow = async (pipeline: Pipeline) => {
-        if (running) return;
-        setError(null);
-        setRunning(pipeline.id);
-        const perms = new PermissionContext();
-        setPermissions(perms);
-        try {
-            if (levelId) {
-                const grants = await listGrants(levelId);
-                perms.levelGrants = grants.map(toScopedGrant);
-            }
-            const runtime = buildPipelineRuntime({
-                settings,
-                fetch: appFetch,
-                permissions: perms,
-            });
-            await runPipeline({
-                pipelineId: pipeline.id,
-                input: runInput,
-                runtime,
-                onProgress: () => void refreshRuns(pipeline.id),
-            });
-        } catch (e) {
-            setError(e instanceof Error ? e.message : String(e));
-        } finally {
-            perms.broker.denyAll();
-            setPermissions(null);
-            setRunning(null);
-            await refreshRuns(pipeline.id);
-        }
-    };
+        if (isTab(tab)) setActive(tab);
+    }, [tab]);
 
     return (
-        <div className="flex flex-col gap-4">
-            <div className="flex items-end gap-3">
-                <label className="flex flex-1 flex-col gap-1 text-sm">
-                    Run input ({"{{input}}"} in step templates)
-                    <Input
-                        value={runInput}
-                        onChange={(e) => setRunInput(e.target.value)}
-                        placeholder="e.g. https://news.ycombinator.com"
-                    />
-                </label>
-                <label className="flex w-56 flex-col gap-1 text-sm">
-                    Permission level for manual runs
-                    <Select
-                        value={levelId}
-                        onChange={(e) => setLevelId(e.target.value)}
-                    >
-                        <option value="">Ask everything</option>
-                        {levels.map((l) => (
-                            <option key={l.id} value={l.id}>
-                                {l.name}
-                            </option>
-                        ))}
-                    </Select>
-                </label>
+        <div className="h-full overflow-y-auto p-6">
+            <div className="mx-auto flex max-w-3xl flex-col gap-6">
+                <header>
+                    <h1 className="font-display text-2xl font-semibold tracking-wide">
+                        Planner
+                    </h1>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                        Deadlines, schedules, applications, and reviews — one
+                        ephemeris for everything time-shaped.
+                    </p>
+                </header>
+                <TabBar tabs={TABS} active={active} onSelect={setActive} />
+                {active === "tasks" && <TasksTab />}
+                {active === "calendar" && <CalendarTab />}
+                {active === "applications" && <ApplicationsTab />}
+                {active === "review" && <ReviewTab />}
             </div>
-
-            {permissions && <ApprovalCards broker={permissions.broker} />}
-            {error && <p className="text-xs text-destructive">{error}</p>}
-
-            {pipelines.map((p) => (
-                <Card key={p.id}>
-                    <CardHeader className="flex-row items-center gap-2">
-                        <div className="flex-1">
-                            <CardTitle>{p.name}</CardTitle>
-                            {p.description && (
-                                <p className="text-xs text-muted-foreground">
-                                    {p.description}
-                                </p>
-                            )}
-                        </div>
-                        <Button
-                            size="sm"
-                            disabled={running !== null}
-                            onClick={() => void runNow(p)}
-                        >
-                            <Play className="mr-1 h-3.5 w-3.5" />
-                            {running === p.id ? "Running…" : "Run"}
-                        </Button>
-                        <Button
-                            variant="ghost"
-                            size="icon"
-                            aria-label={`Edit ${p.name}`}
-                            onClick={() => setEditing(p)}
-                        >
-                            <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button
-                            variant="ghost"
-                            size="icon"
-                            aria-label={`Delete ${p.name}`}
-                            onClick={() =>
-                                void pipelinesRepo
-                                    .deletePipeline(p.id)
-                                    .then(reload)
-                            }
-                        >
-                            <Trash2 className="h-4 w-4" />
-                        </Button>
-                    </CardHeader>
-                    <CardContent className="flex flex-col gap-2">
-                        <button
-                            className="cursor-pointer self-start font-mono text-[10px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
-                            onClick={() =>
-                                runsFor === p.id
-                                    ? setRunsFor(null)
-                                    : void refreshRuns(p.id)
-                            }
-                        >
-                            {runsFor === p.id ? "hide runs" : "show runs"}
-                        </button>
-                        {runsFor === p.id && <RunHistory runs={runs} />}
-                    </CardContent>
-                </Card>
-            ))}
-
-            {editing ? (
-                <PipelineEditor
-                    pipeline={editing === "new" ? null : editing}
-                    agents={agents}
-                    onDone={async () => {
-                        setEditing(null);
-                        await reload();
-                    }}
-                />
-            ) : (
-                <Button className="self-start" onClick={() => setEditing("new")}>
-                    <Plus className="mr-1 h-3.5 w-3.5" /> New pipeline
-                </Button>
-            )}
         </div>
-    );
-}
-
-function PipelineEditor({
-    pipeline,
-    agents,
-    onDone,
-}: {
-    pipeline: Pipeline | null;
-    agents: AgentDef[];
-    onDone: () => Promise<void>;
-}) {
-    const [name, setName] = useState(pipeline?.name ?? "");
-    const [description, setDescription] = useState(pipeline?.description ?? "");
-    const [steps, setSteps] = useState<StepDraft[]>([]);
-    const [error, setError] = useState<string | null>(null);
-
-    useEffect(() => {
-        if (!pipeline) return;
-        void pipelinesRepo
-            .listPipelineSteps(pipeline.id)
-            .then((existing: PipelineStep[]) =>
-                setSteps(
-                    existing.map((s) => ({
-                        agentId: s.agent_id,
-                        promptTemplate: s.prompt_template,
-                    })),
-                ),
-            );
-    }, [pipeline]);
-
-    const save = async () => {
-        setError(null);
-        try {
-            if (steps.length === 0)
-                throw new Error("a pipeline needs at least one step");
-            if (steps.some((s) => !s.agentId))
-                throw new Error("every step needs an agent");
-            const target = pipeline
-                ? await pipelinesRepo.updatePipeline(pipeline.id, {
-                      name,
-                      description: description || null,
-                  })
-                : await pipelinesRepo.createPipeline({
-                      name,
-                      description: description || null,
-                  });
-            await pipelinesRepo.setPipelineSteps(target.id, steps);
-            await onDone();
-        } catch (e) {
-            setError(e instanceof Error ? e.message : String(e));
-        }
-    };
-
-    const setStep = (i: number, patch: Partial<StepDraft>) =>
-        setSteps((all) =>
-            all.map((s, j) => (j === i ? { ...s, ...patch } : s)),
-        );
-
-    return (
-        <Card>
-            <CardHeader>
-                <CardTitle>
-                    {pipeline ? `Edit ${pipeline.name}` : "New pipeline"}
-                </CardTitle>
-                <p className="text-xs text-muted-foreground">
-                    Steps run in order. Templates: {"{{input}}"}, {"{{prev}}"},{" "}
-                    {"{{step1}}"}…, {"{{date}}"}.
-                </p>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-3">
-                <div className="flex gap-3">
-                    <label className="flex flex-1 flex-col gap-1 text-sm">
-                        Name
-                        <Input
-                            value={name}
-                            onChange={(e) => setName(e.target.value)}
-                        />
-                    </label>
-                    <label className="flex flex-1 flex-col gap-1 text-sm">
-                        Description
-                        <Input
-                            value={description}
-                            onChange={(e) => setDescription(e.target.value)}
-                        />
-                    </label>
-                </div>
-                {steps.map((s, i) => (
-                    <div
-                        key={i}
-                        className="flex flex-col gap-2 rounded-md border border-border p-3"
-                    >
-                        <div className="flex items-center gap-2">
-                            <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-                                step {i + 1}
-                            </span>
-                            <Select
-                                aria-label={`Agent for step ${i + 1}`}
-                                value={s.agentId}
-                                onChange={(e) =>
-                                    setStep(i, { agentId: e.target.value })
-                                }
-                                className="w-52"
-                            >
-                                <option value="">Select agent…</option>
-                                {agents.map((a) => (
-                                    <option key={a.id} value={a.id}>
-                                        {a.name}
-                                    </option>
-                                ))}
-                            </Select>
-                            <Button
-                                variant="ghost"
-                                size="icon"
-                                aria-label={`Remove step ${i + 1}`}
-                                onClick={() =>
-                                    setSteps((all) =>
-                                        all.filter((_, j) => j !== i),
-                                    )
-                                }
-                            >
-                                <Trash2 className="h-4 w-4" />
-                            </Button>
-                        </div>
-                        <Textarea
-                            rows={2}
-                            placeholder="Prompt template for this step"
-                            value={s.promptTemplate}
-                            onChange={(e) =>
-                                setStep(i, { promptTemplate: e.target.value })
-                            }
-                        />
-                    </div>
-                ))}
-                <Button
-                    variant="outline"
-                    className="self-start"
-                    onClick={() =>
-                        setSteps((all) => [
-                            ...all,
-                            { agentId: "", promptTemplate: "{{prev}}" },
-                        ])
-                    }
-                >
-                    <Plus className="mr-1 h-3.5 w-3.5" /> Add step
-                </Button>
-                <div className="flex items-center gap-3">
-                    <Button onClick={() => void save()}>Save</Button>
-                    <Button variant="ghost" onClick={() => void onDone()}>
-                        Cancel
-                    </Button>
-                    {error && (
-                        <span className="text-xs text-destructive">{error}</span>
-                    )}
-                </div>
-            </CardContent>
-        </Card>
     );
 }
 ```
 
-- [ ] **Step 4: Wire into `AgentsPage.tsx`**
+- [ ] **Step 4: Rewire Shell/Sidebar/palette**
 
-Replace `PipelinesPlaceholder` usage: `{tab === "pipelines" && <PipelinesTab />}` and delete the placeholder component; add the import.
+- `Sidebar.tsx`: `Page` drops `tasks | applications | review`, gains `planner`. Workspace section items become Notes (`NotebookPen`) and Planner (`CalendarCheck`); drop the `Briefcase`/`GraduationCap` imports.
+- `Shell.tsx`: `PAGES` swaps the three entries for `planner: PlannerPage`; the tab pass-through conditional gains `nav.page === "planner" ? <PlannerPage tab={nav.tab} /> :`.
+- `CommandPalette.tsx` `NAV` rows for tasks/applications/review become:
+
+```ts
+    { target: { page: "planner", tab: "tasks" }, label: "Tasks" },
+    { target: { page: "planner", tab: "calendar" }, label: "Calendar" },
+    { target: { page: "planner", tab: "applications" }, label: "Applications" },
+    { target: { page: "planner", tab: "review" }, label: "Review" },
+```
+
+- `HomePage.tsx` copy: `"No classes today."` (line 158) → `"Nothing scheduled today."`; `"Nothing due. Suspicious — check the Tasks page."` → `"Nothing due. Suspicious — check the Planner."`.
 
 - [ ] **Step 5: Verify**
 
-Run: `npm run typecheck && npm test` — Expected: clean.
-Manual: build "HN digest" (step 1 Research: `Read {{input}} and list the top stories`; step 2 a custom Writer agent with `write_note`: `Save a note titled "HN digest {{date}}" in /digests containing: {{prev}}`), run with a URL input, approve the fetch + write approvals, expand the run history, find the note in Notes.
+Run: `npm run typecheck && npm test` → pass.
+Run: `npm run dev` → Planner shows four tabs; ⌘K "Calendar" deep-links; ICS import, flashcard review, application pipeline all behave as before; sidebar has 3+3+3 entries max.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/app/agents/ src/ai/agents/runtime.ts
-git commit -m "feat: pipelines tab — builder, manual runs with approvals, history"
+git add -A src/app/planner src/app/tasks src/app/applications src/app/review \
+  src/app/Shell.tsx src/app/Sidebar.tsx src/components/palette/CommandPalette.tsx \
+  src/app/home/HomePage.tsx
+git commit -m "feat: Planner section — tasks, calendar+courses, applications, review as tabs"
 ```
+
 ---
 
-## Milestone D — Automations
-
-### Task 13: automations migration + repo + `computeNextRun`
+### Task 10: Agents section — Chat becomes the first tab
 
 **Files:**
-- Create: `src-tauri/migrations/0005_automations.sql`, `src/db/repo/automations.ts`, `src/ai/automations/schedule.ts`
-- Modify: `src-tauri/src/lib.rs`, `src/lib/schemas.ts`
-- Test: `src/ai/automations/schedule.test.ts`, `src/db/repo/automations.test.ts`
+- Move: `git mv src/app/chat/ChatPage.tsx src/app/chat/ChatWorkspace.tsx`
+- Modify: `src/app/agents/AgentsPage.tsx`, `src/app/chat/InstancesSidebar.tsx` (copy), `src/app/Shell.tsx`, `src/app/Sidebar.tsx`, `src/components/palette/CommandPalette.tsx`
 
 **Interfaces:**
-- Produces (schema): `automationSchema/Automation` — `schedule_kind: "interval"|"daily"|"weekly"`, `interval_minutes`, `time_of_day` ("HH:MM"), `day_of_week` (0=Sun…6=Sat), `input_template`, `permission_level_id`, `output_note_folder`, `enabled`, `next_run_at`, `last_run_at`.
-- Produces (repo): `AutomationInput`, `createAutomation(input)` (computes initial `next_run_at`), `updateAutomation(id, input)` (recomputes), `setAutomationEnabled(id, enabled)` (recomputes on enable), `deleteAutomation(id)`, `getAutomation(id)`, `listAutomations()`, `listDueAutomations(nowMs)`, `markRun(id, { nextRunAt, lastRunAt })`.
-- Produces (pure): `computeNextRun(a: Automation, from: number): number`.
+- Produces: `ChatWorkspace({ initialSessionId }: { initialSessionId?: string | null })` (renamed from `ChatPage`; new optional prop opens that session on mount). `AgentsPage({ tab, sessionId }: { tab?: string; sessionId?: string | null })` with tabs `"chat" | "roster" | "pipelines" | "automations"`, default `"chat"`. `NavTarget` gains `sessionId?: string`. `Page` drops `"chat"`.
 
-- [ ] **Step 1: Migration `src-tauri/migrations/0005_automations.sql`**
+- [ ] **Step 1: Rename and extend ChatWorkspace**
 
-```sql
--- Scheduled pipeline runs. The scheduler only fires while the app is open
--- (no server process by design); an overdue automation fires once on launch.
-
-CREATE TABLE automations (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL UNIQUE,
-    pipeline_id TEXT NOT NULL REFERENCES pipelines(id) ON DELETE CASCADE,
-    schedule_kind TEXT NOT NULL CHECK (schedule_kind IN ('interval', 'daily', 'weekly')),
-    interval_minutes INTEGER,
-    time_of_day TEXT,
-    day_of_week INTEGER,
-    input_template TEXT NOT NULL DEFAULT '',
-    permission_level_id TEXT REFERENCES permission_levels(id),
-    output_note_folder TEXT,
-    enabled INTEGER NOT NULL DEFAULT 1,
-    next_run_at INTEGER,
-    last_run_at INTEGER,
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
-);
-```
-
-Register in `src-tauri/src/lib.rs` as version 5, description `"automations"`.
-
-- [ ] **Step 2: Schema in `src/lib/schemas.ts`**
-
-```ts
-export const scheduleKindSchema = z.enum(["interval", "daily", "weekly"]);
-export type ScheduleKind = z.infer<typeof scheduleKindSchema>;
-
-export const automationSchema = z.object({
-    id: z.string(),
-    name: z.string(),
-    pipeline_id: z.string(),
-    schedule_kind: scheduleKindSchema,
-    interval_minutes: z.number().nullable(),
-    time_of_day: z.string().nullable(),
-    day_of_week: z.number().nullable(),
-    input_template: z.string(),
-    permission_level_id: z.string().nullable(),
-    output_note_folder: z.string().nullable(),
-    enabled: sqlBool,
-    next_run_at: z.number().nullable(),
-    last_run_at: z.number().nullable(),
-    created_at: z.number(),
-    updated_at: z.number(),
-});
-export type Automation = z.infer<typeof automationSchema>;
-```
-
-- [ ] **Step 3: Failing tests for `computeNextRun`**
-
-```ts
-// src/ai/automations/schedule.test.ts
-import { describe, expect, it } from "vitest";
-import type { Automation } from "@/lib/schemas";
-import { computeNextRun } from "./schedule";
-
-function auto(overrides: Partial<Automation>): Automation {
-    return {
-        id: "aut_1",
-        name: "A",
-        pipeline_id: "pip_1",
-        schedule_kind: "interval",
-        interval_minutes: null,
-        time_of_day: null,
-        day_of_week: null,
-        input_template: "",
-        permission_level_id: null,
-        output_note_folder: null,
-        enabled: 1,
-        next_run_at: null,
-        last_run_at: null,
-        created_at: 0,
-        updated_at: 0,
-        ...overrides,
-    };
-}
-
-describe("computeNextRun", () => {
-    it("interval: now + N minutes", () => {
-        const from = Date.UTC(2026, 6, 11, 12, 0, 0);
-        expect(
-            computeNextRun(
-                auto({ schedule_kind: "interval", interval_minutes: 30 }),
-                from,
-            ),
-        ).toBe(from + 30 * 60_000);
-    });
-
-    it("interval: rejects missing/zero minutes", () => {
-        expect(() =>
-            computeNextRun(auto({ schedule_kind: "interval" }), 0),
-        ).toThrow(/interval_minutes/);
-    });
-
-    it("daily: later today if the time is still ahead", () => {
-        const from = new Date(2026, 6, 11, 8, 0, 0).getTime(); // local 08:00
-        const next = computeNextRun(
-            auto({ schedule_kind: "daily", time_of_day: "09:30" }),
-            from,
-        );
-        const d = new Date(next);
-        expect([d.getHours(), d.getMinutes(), d.getDate()]).toEqual([9, 30, 11]);
-    });
-
-    it("daily: tomorrow if the time already passed", () => {
-        const from = new Date(2026, 6, 11, 10, 0, 0).getTime();
-        const d = new Date(
-            computeNextRun(
-                auto({ schedule_kind: "daily", time_of_day: "09:30" }),
-                from,
-            ),
-        );
-        expect(d.getDate()).toBe(12);
-    });
-
-    it("weekly: next matching weekday at the given time", () => {
-        // 2026-07-11 is a Saturday (getDay() === 6).
-        const from = new Date(2026, 6, 11, 10, 0, 0).getTime();
-        const d = new Date(
-            computeNextRun(
-                auto({
-                    schedule_kind: "weekly",
-                    time_of_day: "07:00",
-                    day_of_week: 1, // Monday
-                }),
-                from,
-            ),
-        );
-        expect([d.getDay(), d.getHours(), d.getDate()]).toEqual([1, 7, 13]);
-    });
-
-    it("daily: rejects malformed time_of_day", () => {
-        expect(() =>
-            computeNextRun(
-                auto({ schedule_kind: "daily", time_of_day: "9am" }),
-                0,
-            ),
-        ).toThrow(/time_of_day/);
-    });
-});
-```
-
-Run: `npx vitest run src/ai/automations/schedule.test.ts` — Expected: FAIL (module not found).
-
-- [ ] **Step 4: Implement `src/ai/automations/schedule.ts`**
-
-```ts
-import type { Automation } from "@/lib/schemas";
-
-/** Next fire time strictly after `from`, in local time (schedules are human-local). */
-export function computeNextRun(a: Automation, from: number): number {
-    switch (a.schedule_kind) {
-        case "interval": {
-            if (!a.interval_minutes || a.interval_minutes < 1)
-                throw new Error(
-                    `interval schedule requires interval_minutes >= 1 (automation ${a.name})`,
-                );
-            return from + a.interval_minutes * 60_000;
-        }
-        case "daily":
-            return nextAtTime(from, a.time_of_day, null);
-        case "weekly":
-            return nextAtTime(from, a.time_of_day, a.day_of_week);
-    }
-}
-
-function nextAtTime(
-    from: number,
-    timeOfDay: string | null,
-    dayOfWeek: number | null,
-): number {
-    const match = /^(\d{2}):(\d{2})$/.exec(timeOfDay ?? "");
-    if (!match)
-        throw new Error(`schedule requires time_of_day as HH:MM, got: ${timeOfDay}`);
-    const d = new Date(from);
-    d.setHours(Number(match[1]), Number(match[2]), 0, 0);
-    if (dayOfWeek === null) {
-        if (d.getTime() <= from) d.setDate(d.getDate() + 1);
-        return d.getTime();
-    }
-    if (dayOfWeek < 0 || dayOfWeek > 6)
-        throw new Error(`day_of_week must be 0-6, got: ${dayOfWeek}`);
-    while (d.getDay() !== dayOfWeek || d.getTime() <= from)
-        d.setDate(d.getDate() + 1);
-    return d.getTime();
-}
-```
-
-Run: `npx vitest run src/ai/automations/schedule.test.ts` — Expected: PASS.
-
-- [ ] **Step 5: Failing repo tests**
-
-```ts
-// src/db/repo/automations.test.ts
-import { beforeEach, afterEach, describe, expect, it } from "vitest";
-import { createTestDbClient } from "@/db/testClient";
-import { setDb } from "@/db/client";
-import { createPipeline } from "./pipelines";
-import {
-    createAutomation,
-    listAutomations,
-    listDueAutomations,
-    markRun,
-    setAutomationEnabled,
-} from "./automations";
-
-let db: ReturnType<typeof createTestDbClient>;
-
-beforeEach(async () => {
-    db = createTestDbClient();
-    setDb(db);
-});
-afterEach(() => db.close());
-
-async function pipeline() {
-    return createPipeline({ name: `P${Math.random()}` });
-}
-
-describe("automations repo", () => {
-    it("creates with a computed next_run_at", async () => {
-        const p = await pipeline();
-        const before = Date.now();
-        const a = await createAutomation({
-            name: "Every hour",
-            pipelineId: p.id,
-            scheduleKind: "interval",
-            intervalMinutes: 60,
-            inputTemplate: "",
-        });
-        expect(a.next_run_at).toBeGreaterThanOrEqual(before + 59 * 60_000);
-    });
-
-    it("lists only enabled, due automations", async () => {
-        const p = await pipeline();
-        const a = await createAutomation({
-            name: "Soon",
-            pipelineId: p.id,
-            scheduleKind: "interval",
-            intervalMinutes: 1,
-            inputTemplate: "",
-        });
-        expect(await listDueAutomations(Date.now())).toHaveLength(0);
-        expect(
-            await listDueAutomations(Date.now() + 2 * 60_000),
-        ).toHaveLength(1);
-
-        await setAutomationEnabled(a.id, false);
-        expect(
-            await listDueAutomations(Date.now() + 2 * 60_000),
-        ).toHaveLength(0);
-    });
-
-    it("markRun advances the clock", async () => {
-        const p = await pipeline();
-        const a = await createAutomation({
-            name: "M",
-            pipelineId: p.id,
-            scheduleKind: "interval",
-            intervalMinutes: 5,
-            inputTemplate: "",
-        });
-        const t = Date.now() + 10 * 60_000;
-        await markRun(a.id, { nextRunAt: t + 5 * 60_000, lastRunAt: t });
-        const [row] = await listAutomations();
-        expect(row!.last_run_at).toBe(t);
-        expect(row!.next_run_at).toBe(t + 5 * 60_000);
-    });
-});
-```
-
-Run: `npx vitest run src/db/repo/automations.test.ts` — Expected: FAIL (module not found).
-
-- [ ] **Step 6: Implement `src/db/repo/automations.ts`**
-
-```ts
-import { getDb } from "../client";
-import { newId, now } from "@/lib/ids";
-import { automationSchema, type Automation, type ScheduleKind } from "@/lib/schemas";
-import { computeNextRun } from "@/ai/automations/schedule";
-
-export interface AutomationInput {
-    name: string;
-    pipelineId: string;
-    scheduleKind: ScheduleKind;
-    intervalMinutes?: number | null;
-    timeOfDay?: string | null;
-    dayOfWeek?: number | null;
-    inputTemplate: string;
-    permissionLevelId?: string | null;
-    outputNoteFolder?: string | null;
-}
-
-export async function createAutomation(
-    input: AutomationInput,
-): Promise<Automation> {
-    const id = newId("aut");
-    const t = now();
-    await getDb().execute(
-        `INSERT INTO automations
-           (id, name, pipeline_id, schedule_kind, interval_minutes, time_of_day,
-            day_of_week, input_template, permission_level_id, output_note_folder,
-            enabled, next_run_at, last_run_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, NULL, ?, ?)`,
-        [
-            id,
-            input.name,
-            input.pipelineId,
-            input.scheduleKind,
-            input.intervalMinutes ?? null,
-            input.timeOfDay ?? null,
-            input.dayOfWeek ?? null,
-            input.inputTemplate,
-            input.permissionLevelId ?? null,
-            input.outputNoteFolder ?? null,
-            t,
-            t,
-        ],
-    );
-    const created = await getAutomation(id);
-    // Validates the schedule too — a bad HH:MM fails here, at save time.
-    await getDb().execute(
-        "UPDATE automations SET next_run_at = ? WHERE id = ?",
-        [computeNextRun(created, t), id],
-    );
-    return getAutomation(id);
-}
-
-export async function updateAutomation(
-    id: string,
-    input: AutomationInput,
-): Promise<Automation> {
-    const res = await getDb().execute(
-        `UPDATE automations SET
-           name = ?, pipeline_id = ?, schedule_kind = ?, interval_minutes = ?,
-           time_of_day = ?, day_of_week = ?, input_template = ?,
-           permission_level_id = ?, output_note_folder = ?, updated_at = ?
-         WHERE id = ?`,
-        [
-            input.name,
-            input.pipelineId,
-            input.scheduleKind,
-            input.intervalMinutes ?? null,
-            input.timeOfDay ?? null,
-            input.dayOfWeek ?? null,
-            input.inputTemplate,
-            input.permissionLevelId ?? null,
-            input.outputNoteFolder ?? null,
-            now(),
-            id,
-        ],
-    );
-    if (res.rowsAffected === 0) throw new Error(`automation not found: ${id}`);
-    const updated = await getAutomation(id);
-    await getDb().execute(
-        "UPDATE automations SET next_run_at = ? WHERE id = ?",
-        [computeNextRun(updated, now()), id],
-    );
-    return getAutomation(id);
-}
-
-export async function setAutomationEnabled(
-    id: string,
-    enabled: boolean,
-): Promise<void> {
-    const a = await getAutomation(id);
-    await getDb().execute(
-        "UPDATE automations SET enabled = ?, next_run_at = ?, updated_at = ? WHERE id = ?",
-        [
-            enabled ? 1 : 0,
-            enabled ? computeNextRun(a, now()) : a.next_run_at,
-            now(),
-            id,
-        ],
-    );
-}
-
-export async function getAutomation(id: string): Promise<Automation> {
-    const rows = await getDb().select(
-        "SELECT * FROM automations WHERE id = ?",
-        [id],
-    );
-    if (!rows[0]) throw new Error(`automation not found: ${id}`);
-    return automationSchema.parse(rows[0]);
-}
-
-export async function listAutomations(): Promise<Automation[]> {
-    const rows = await getDb().select(
-        "SELECT * FROM automations ORDER BY created_at ASC",
-    );
-    return rows.map((r) => automationSchema.parse(r));
-}
-
-export async function deleteAutomation(id: string): Promise<void> {
-    await getDb().execute("DELETE FROM automations WHERE id = ?", [id]);
-}
-
-export async function listDueAutomations(
-    nowMs: number,
-): Promise<Automation[]> {
-    const rows = await getDb().select(
-        `SELECT * FROM automations
-         WHERE enabled = 1 AND next_run_at IS NOT NULL AND next_run_at <= ?
-         ORDER BY next_run_at ASC`,
-        [nowMs],
-    );
-    return rows.map((r) => automationSchema.parse(r));
-}
-
-/** Claim a due automation: advance its clock before the (slow) run starts. */
-export async function markRun(
-    id: string,
-    times: { nextRunAt: number; lastRunAt: number },
-): Promise<void> {
-    await getDb().execute(
-        "UPDATE automations SET next_run_at = ?, last_run_at = ?, updated_at = ? WHERE id = ?",
-        [times.nextRunAt, times.lastRunAt, now(), id],
-    );
-}
-```
-
-- [ ] **Step 7: Run tests, typecheck, commit**
-
-Run: `npm test && npm run typecheck` — Expected: PASS/clean.
-
-```bash
-git add src-tauri/migrations/0005_automations.sql src-tauri/src/lib.rs src/lib/schemas.ts src/db/repo/automations.ts src/db/repo/automations.test.ts src/ai/automations/
-git commit -m "feat: automations schema, repo, and schedule math"
-```
-
-### Task 14: headless run + scheduler
-
-**Files:**
-- Create: `src/ai/automations/run.ts`, `src/ai/automations/scheduler.ts`
-- Test: `src/ai/automations/scheduler.test.ts`
-
-**Interfaces:**
-- Consumes: automations repo (Task 13), `runPipeline` (Task 11), `buildPipelineRuntime` (Task 12), `renderTemplate`, `createNote`, `listGrants` + `toScopedGrant`, `PermissionContext`.
-- Produces: `createAutoDenyPermissions(levelId: string | null): Promise<PermissionContext>`; `runAutomation(a: Automation, deps: { settings: Settings; fetch: typeof globalThis.fetch }): Promise<void>`; `startAutomationScheduler(deps: { settings: Settings; fetch: typeof globalThis.fetch; tickMs?: number; run?: (a: Automation) => Promise<void> }): () => void` (returns stop; `run` injectable for tests/UI "run now").
-
-- [ ] **Step 1: Implement `src/ai/automations/run.ts`** (write first — the scheduler test injects a fake `run`, so this file is exercised manually + via its parts' own tests)
-
-```ts
-import { listGrants } from "@/db/repo/permissions";
-import { toScopedGrant } from "@/ai/permissions/engine";
-import { PermissionContext } from "@/ai/tools/context";
-import { buildPipelineRuntime } from "@/ai/agents/runtime";
-import { runPipeline } from "@/ai/pipelines/runner";
-import { renderTemplate } from "@/lib/template";
-import { createNote } from "@/db/repo/notes";
-import type { Settings } from "@/ai/providers/keys";
-import type { Automation } from "@/lib/schemas";
-
-/**
- * Permissions for unattended runs: the chosen level's grants apply, and
- * anything outside them is denied immediately — nobody is watching to
- * approve, and a paused broker would hang the scheduler forever.
- */
-export async function createAutoDenyPermissions(
-    levelId: string | null,
-): Promise<PermissionContext> {
-    const permissions = new PermissionContext();
-    if (levelId) {
-        const grants = await listGrants(levelId);
-        permissions.levelGrants = grants.map(toScopedGrant);
-    }
-    permissions.broker.subscribe((pending) => {
-        for (const req of pending) permissions.broker.respond(req.id, "deny");
-    });
-    return permissions;
-}
-
-/** One unattended automation run; optionally files the result as a note. */
-export async function runAutomation(
-    a: Automation,
-    deps: { settings: Settings; fetch: typeof globalThis.fetch },
-): Promise<void> {
-    const permissions = await createAutoDenyPermissions(a.permission_level_id);
-    const runtime = buildPipelineRuntime({
-        settings: deps.settings,
-        fetch: deps.fetch,
-        permissions,
-    });
-    const input = renderTemplate(a.input_template, {
-        date: new Date().toISOString().slice(0, 10),
-    });
-    const result = await runPipeline({
-        pipelineId: a.pipeline_id,
-        input,
-        runtime,
-        automationId: a.id,
-    });
-    if (a.output_note_folder && result.status === "success") {
-        await createNote({
-            title: `${a.name} — ${new Date().toLocaleString()}`,
-            folder: a.output_note_folder,
-            bodyMd: result.finalOutput,
-        });
-    }
-}
-```
-
-- [ ] **Step 2: Write the failing scheduler test**
-
-```ts
-// src/ai/automations/scheduler.test.ts
-import {
-    afterEach,
-    beforeEach,
-    describe,
-    expect,
-    it,
-    vi,
-} from "vitest";
-import { createTestDbClient } from "@/db/testClient";
-import { setDb } from "@/db/client";
-import { createPipeline } from "@/db/repo/pipelines";
-import {
-    createAutomation,
-    getAutomation,
-    listDueAutomations,
-} from "@/db/repo/automations";
-import { DEFAULT_SETTINGS } from "@/ai/providers/keys";
-import { startAutomationScheduler } from "./scheduler";
-import type { Automation } from "@/lib/schemas";
-
-let db: ReturnType<typeof createTestDbClient>;
-
-beforeEach(() => {
-    db = createTestDbClient();
-    setDb(db);
-});
-afterEach(() => {
-    db.close();
-    vi.useRealTimers();
-});
-
-describe("automation scheduler", () => {
-    it("claims due automations exactly once and reschedules", async () => {
-        const p = await createPipeline({ name: "P" });
-        const a = await createAutomation({
-            name: "Every minute",
-            pipelineId: p.id,
-            scheduleKind: "interval",
-            intervalMinutes: 1,
-            inputTemplate: "",
-        });
-        // Force it due now.
-        const { markRun } = await import("@/db/repo/automations");
-        await markRun(a.id, { nextRunAt: Date.now() - 1000, lastRunAt: 0 });
-
-        const ran: string[] = [];
-        const stop = startAutomationScheduler({
-            settings: DEFAULT_SETTINGS,
-            fetch: async () => new Response("stub"),
-            tickMs: 5,
-            run: async (auto: Automation) => {
-                ran.push(auto.id);
-            },
-        });
-        // The scheduler ticks immediately; give the async tick a beat.
-        await vi.waitFor(() => expect(ran).toEqual([a.id]));
-        stop();
-
-        const after = await getAutomation(a.id);
-        expect(after.next_run_at).toBeGreaterThan(Date.now());
-        expect(await listDueAutomations(Date.now())).toHaveLength(0);
-    });
-
-    it("keeps ticking when a run throws", async () => {
-        const p = await createPipeline({ name: "P2" });
-        const a = await createAutomation({
-            name: "Flaky",
-            pipelineId: p.id,
-            scheduleKind: "interval",
-            intervalMinutes: 1,
-            inputTemplate: "",
-        });
-        const { markRun } = await import("@/db/repo/automations");
-        await markRun(a.id, { nextRunAt: Date.now() - 1000, lastRunAt: 0 });
-
-        const stop = startAutomationScheduler({
-            settings: DEFAULT_SETTINGS,
-            fetch: async () => new Response("stub"),
-            tickMs: 5,
-            run: async () => {
-                throw new Error("boom");
-            },
-        });
-        await vi.waitFor(async () =>
-            expect((await getAutomation(a.id)).next_run_at).toBeGreaterThan(
-                Date.now(),
-            ),
-        );
-        stop(); // no unhandled rejection = pass
-    });
-});
-```
-
-Run: `npx vitest run src/ai/automations/scheduler.test.ts` — Expected: FAIL (module not found).
-
-- [ ] **Step 3: Implement `src/ai/automations/scheduler.ts`**
-
-```ts
-import {
-    listDueAutomations,
-    markRun,
-} from "@/db/repo/automations";
-import { computeNextRun } from "./schedule";
-import { runAutomation } from "./run";
-import type { Settings } from "@/ai/providers/keys";
-import type { Automation } from "@/lib/schemas";
-
-/**
- * Fires due automations while the app is open. Claims (advances next_run_at)
- * BEFORE running so a slow run can never double-fire; failures log and the
- * loop keeps going. Returns a stop function.
- */
-export function startAutomationScheduler(deps: {
-    settings: Settings;
-    fetch: typeof globalThis.fetch;
-    tickMs?: number;
-    /** Injectable for tests; defaults to the real headless run. */
-    run?: (a: Automation) => Promise<void>;
-}): () => void {
-    const run =
-        deps.run ??
-        ((a: Automation) =>
-            runAutomation(a, { settings: deps.settings, fetch: deps.fetch }));
-    let ticking = false;
-
-    const tick = async () => {
-        if (ticking) return; // a long run outlasted the interval — skip
-        ticking = true;
-        try {
-            const due = await listDueAutomations(Date.now());
-            for (const a of due) {
-                const t = Date.now();
-                await markRun(a.id, {
-                    nextRunAt: computeNextRun(a, t),
-                    lastRunAt: t,
-                });
-                try {
-                    await run(a);
-                } catch (e) {
-                    console.error(`automation "${a.name}" failed:`, e);
-                }
-            }
-        } finally {
-            ticking = false;
-        }
-    };
-
-    const id = setInterval(() => void tick(), deps.tickMs ?? 30_000);
-    void tick(); // catch up on launch (overdue automations fire once)
-    return () => clearInterval(id);
-}
-```
-
-- [ ] **Step 4: Run tests, typecheck, commit**
-
-Run: `npx vitest run src/ai/automations/scheduler.test.ts && npm test && npm run typecheck` — Expected: PASS/clean.
-
-```bash
-git add src/ai/automations/
-git commit -m "feat: headless automation runs + claim-first scheduler"
-```
-
-### Task 15: Automations tab UI + scheduler wiring
-
-**Files:**
-- Create: `src/app/agents/AutomationsTab.tsx`
-- Modify: `src/app/agents/AgentsPage.tsx` (replace `AutomationsPlaceholder`), `src/App.tsx` (start/stop the scheduler)
-
-**Interfaces:**
-- Consumes: automations repo, pipelines repo (`listPipelines`, `listRuns`), `runAutomation`, `startAutomationScheduler`, `appFetch`, `useRuntime()`, `RunHistory` (Task 12), permission levels.
-- Produces: `AutomationsTab()` — terminal consumer.
-
-- [ ] **Step 1: Start the scheduler in `src/App.tsx`**
-
-Add imports:
+In the moved file: rename the exported function `ChatPage` → `ChatWorkspace`, add the prop, and after `openSession` is defined add:
 
 ```tsx
-import { startAutomationScheduler } from "@/ai/automations/scheduler";
-import { appFetch } from "@/ai/providers/appFetch";
-```
-
-Add an effect after the boot effect (settings-keyed so key changes rebuild it):
-
-```tsx
-useEffect(() => {
-    if (!boot || !settings) return;
-    return startAutomationScheduler({ settings, fetch: appFetch });
-}, [boot, settings]);
-```
-
-- [ ] **Step 2: Create `src/app/agents/AutomationsTab.tsx`**
-
-```tsx
-import { useCallback, useEffect, useState } from "react";
-import { Pencil, Play, Plus, Trash2 } from "lucide-react";
-import * as automationsRepo from "@/db/repo/automations";
-import { listPipelines, listRuns } from "@/db/repo/pipelines";
-import { listLevels } from "@/db/repo/permissions";
-import { runAutomation } from "@/ai/automations/run";
-import { appFetch } from "@/ai/providers/appFetch";
-import { useRuntime } from "@/app/runtime";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Select } from "@/components/ui/select";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import type {
-    Automation,
-    PermissionLevel,
-    Pipeline,
-    PipelineRun,
-    ScheduleKind,
-} from "@/lib/schemas";
-import { RunHistory } from "./RunHistory";
-
-const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-
-export function AutomationsTab() {
-    const { settings } = useRuntime();
-    const [automations, setAutomations] = useState<Automation[]>([]);
-    const [pipelines, setPipelines] = useState<Pipeline[]>([]);
-    const [levels, setLevels] = useState<PermissionLevel[]>([]);
-    const [editing, setEditing] = useState<Automation | "new" | null>(null);
-    const [runsFor, setRunsFor] = useState<string | null>(null);
-    const [runs, setRuns] = useState<PipelineRun[]>([]);
-    const [busy, setBusy] = useState<string | null>(null);
-    const [error, setError] = useState<string | null>(null);
-
-    const reload = useCallback(async () => {
-        setAutomations(await automationsRepo.listAutomations());
-        setPipelines(await listPipelines());
-        setLevels(await listLevels());
-    }, []);
+    // Deep link (e.g. "open this project chat" from the Projects page).
     useEffect(() => {
-        void reload();
-    }, [reload]);
+        if (!initialSessionId) return;
+        void sessionsRepo
+            .getSession(initialSessionId)
+            .then(openSession)
+            .catch((e: unknown) =>
+                setError(e instanceof Error ? e.message : String(e)),
+            );
+    }, [initialSessionId, openSession]);
+```
 
-    const showRuns = async (a: Automation) => {
-        setRunsFor(a.id);
-        setRuns(await listRuns({ automationId: a.id }));
-    };
+- [ ] **Step 2: Restructure AgentsPage around tabs**
 
-    const runNow = async (a: Automation) => {
-        setBusy(a.id);
-        setError(null);
-        try {
-            // Same headless semantics as a scheduled fire: out-of-level denies.
-            await runAutomation(a, { settings, fetch: appFetch });
-            await showRuns(a);
-        } catch (e) {
-            setError(e instanceof Error ? e.message : String(e));
-        } finally {
-            setBusy(null);
-        }
-    };
+Replace the top of `AgentsPage.tsx`:
 
-    const pipelineName = (id: string) =>
-        pipelines.find((p) => p.id === id)?.name ?? id;
+```tsx
+type Tab = "chat" | "roster" | "pipelines" | "automations";
+const TABS: { id: Tab; label: string }[] = [
+    { id: "chat", label: "Chat" },
+    { id: "roster", label: "Roster" },
+    { id: "pipelines", label: "Pipelines" },
+    { id: "automations", label: "Automations" },
+];
+const isTab = (t: string | undefined): t is Tab => TABS.some((x) => x.id === t);
+
+export function AgentsPage({
+    tab,
+    sessionId,
+}: {
+    tab?: string;
+    sessionId?: string | null;
+}) {
+    const [active, setActive] = useState<Tab>(isTab(tab) ? tab : "chat");
+    useEffect(() => {
+        if (isTab(tab)) setActive(tab);
+    }, [tab]);
 
     return (
-        <div className="flex flex-col gap-4">
-            <p className="text-sm text-muted-foreground">
-                Automations fire while the app is open; anything outside the
-                chosen permission level is denied — no approval cards, no
-                surprises. Overdue schedules catch up once at launch.
-            </p>
-            {error && <p className="text-xs text-destructive">{error}</p>}
-
-            {automations.map((a) => (
-                <Card key={a.id}>
-                    <CardHeader className="flex-row items-center gap-2">
-                        <div className="flex-1">
-                            <CardTitle>{a.name}</CardTitle>
-                            <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-                                {pipelineName(a.pipeline_id)} ·{" "}
-                                {describeSchedule(a)} · next{" "}
-                                {a.next_run_at
-                                    ? new Date(a.next_run_at).toLocaleString()
-                                    : "—"}
-                                {a.last_run_at
-                                    ? ` · last ${new Date(a.last_run_at).toLocaleString()}`
-                                    : ""}
-                            </p>
-                        </div>
-                        <Badge tone={a.enabled ? "success" : "neutral"}>
-                            {a.enabled ? "enabled" : "paused"}
-                        </Badge>
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() =>
-                                void automationsRepo
-                                    .setAutomationEnabled(a.id, !a.enabled)
-                                    .then(reload)
-                            }
-                        >
-                            {a.enabled ? "Pause" : "Enable"}
-                        </Button>
-                        <Button
-                            size="sm"
-                            disabled={busy !== null}
-                            onClick={() => void runNow(a)}
-                        >
-                            <Play className="mr-1 h-3.5 w-3.5" />
-                            {busy === a.id ? "Running…" : "Run now"}
-                        </Button>
-                        <Button
-                            variant="ghost"
-                            size="icon"
-                            aria-label={`Edit ${a.name}`}
-                            onClick={() => setEditing(a)}
-                        >
-                            <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button
-                            variant="ghost"
-                            size="icon"
-                            aria-label={`Delete ${a.name}`}
-                            onClick={() =>
-                                void automationsRepo
-                                    .deleteAutomation(a.id)
-                                    .then(reload)
-                            }
-                        >
-                            <Trash2 className="h-4 w-4" />
-                        </Button>
-                    </CardHeader>
-                    <CardContent className="flex flex-col gap-2">
-                        <button
-                            className="cursor-pointer self-start font-mono text-[10px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
-                            onClick={() =>
-                                runsFor === a.id
-                                    ? setRunsFor(null)
-                                    : void showRuns(a)
-                            }
-                        >
-                            {runsFor === a.id ? "hide runs" : "show runs"}
-                        </button>
-                        {runsFor === a.id && <RunHistory runs={runs} />}
-                    </CardContent>
-                </Card>
-            ))}
-
-            {editing ? (
-                <AutomationEditor
-                    automation={editing === "new" ? null : editing}
-                    pipelines={pipelines}
-                    levels={levels}
-                    onDone={async () => {
-                        setEditing(null);
-                        await reload();
-                    }}
-                />
+        <div className="flex h-full flex-col">
+            <div className="px-6 pt-4">
+                <TabBar tabs={TABS} active={active} onSelect={setActive} />
+            </div>
+            {active === "chat" ? (
+                <div className="min-h-0 flex-1">
+                    <ChatWorkspace initialSessionId={sessionId} />
+                </div>
             ) : (
-                <Button className="self-start" onClick={() => setEditing("new")}>
-                    <Plus className="mr-1 h-3.5 w-3.5" /> New automation
-                </Button>
+                <div className="min-h-0 flex-1 overflow-y-auto p-6">
+                    <div className="mx-auto flex max-w-4xl flex-col gap-6">
+                        <header>
+                            <h1 className="font-display text-2xl font-semibold tracking-wide">
+                                Agents
+                            </h1>
+                            <p className="mt-1 text-sm text-muted-foreground">
+                                {TAB_BLURBS[active]}
+                            </p>
+                        </header>
+                        {active === "roster" && <RosterTab />}
+                        {active === "pipelines" && <PipelinesTab />}
+                        {active === "automations" && <AutomationsTab />}
+                    </div>
+                </div>
             )}
         </div>
     );
 }
 
-function describeSchedule(a: Automation): string {
-    switch (a.schedule_kind) {
-        case "interval":
-            return `every ${a.interval_minutes} min`;
-        case "daily":
-            return `daily ${a.time_of_day}`;
-        case "weekly":
-            return `${DAYS[a.day_of_week ?? 0]} ${a.time_of_day}`;
-    }
-}
+const TAB_BLURBS: Record<Exclude<Tab, "chat">, string> = {
+    roster: "Your specialists. Each one is just instructions + a set of tools + a model — edit anything, or duplicate a builtin to start from a working example.",
+    pipelines:
+        "Chain agents into a sequence of steps. Each step sends a prompt to one agent; a step can reuse what earlier steps produced.",
+    automations:
+        "Put a pipeline on a schedule. Every tool call still passes the permission engine — nothing runs silently.",
+};
+```
 
-function AutomationEditor({
-    automation,
-    pipelines,
-    levels,
-    onDone,
+- [ ] **Step 3: Remove the standalone chat page**
+
+- `Sidebar.tsx`: drop `"chat"` from `Page` and remove the Chat nav item (Agents is now the second Command entry). Remove the unused `MessageSquare` import (keep the `icon: typeof Network`-style typing valid — use `Network` in the `NavItem` interface annotation if `MessageSquare` was referenced there).
+- `Shell.tsx`: remove `chat: ChatPage` and its import; render `nav.page === "agents" ? <AgentsPage tab={nav.tab} sessionId={nav.sessionId} /> : …`. Add `sessionId?: string` to `NavTarget` in `Sidebar.tsx`.
+- `CommandPalette.tsx`: `{ target: { page: "chat" }, label: "Chat" }` → `{ target: { page: "agents", tab: "chat" }, label: "Chat" }`; `{ target: { page: "agents" }, label: "Agents" }` → `{ target: { page: "agents", tab: "roster" }, label: "Agent roster" }`; add `{ target: { page: "agents", tab: "pipelines" }, label: "Pipelines" }` and `{ target: { page: "agents", tab: "automations" }, label: "Automations" }`.
+
+- [ ] **Step 4: Humanize the chat sidebar copy**
+
+In `InstancesSidebar.tsx`: panel heading `"Agents"` (line 124) → `"Chats"`; collapse/expand button labels `"… agents panel"` → `"… chats panel"`; empty text `"No agents yet. Start one from a preset above."` → `"No chats yet. Start one from a preset above."`; delete button label `"Delete agent"` → `"Delete chat"`. In `ChatWorkspace` the empty-state hint `"Start an agent from a preset in the sidebar."` → `"Start a chat from a preset in the sidebar."`.
+
+- [ ] **Step 5: Verify**
+
+Run: `npm run typecheck && npm test` → pass.
+Run: `npm run dev` → Agents opens on the Chat tab with the full-height chat workspace (sidebar + sphere); Roster/Pipelines/Automations tabs scroll independently; ⌘K "Chat" works; no dead "chat" page remains.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add -A src/app/chat src/app/agents src/app/Shell.tsx src/app/Sidebar.tsx \
+  src/components/palette/CommandPalette.tsx
+git commit -m "feat: chat lives inside the Agents section as its first tab"
+```
+
+---
+
+### Task 11: Projects UI — list page + detail (files, chats, bookmarks, automations)
+
+**Files:**
+- Create: `src/app/projects/ProjectsPage.tsx`, `src/app/projects/ProjectDetail.tsx`
+- Modify: `src/app/Sidebar.tsx` (add `"projects"` to `Page` + a Workspace nav item with the `FolderKanban` icon), `src/app/Shell.tsx` (PAGES entry + pass `onNavigate` to ProjectsPage), `src/app/agents/AutomationsTab.tsx` (project select in the form)
+
+**Interfaces:**
+- Consumes: everything from Tasks 4–5; `ingestPdf` from `@/ai/multimodal/pdf`; `insertDocument`, `listProjectDocuments`, and `deleteDocument` (exists at `documents.ts:91`) from the documents repo.
+- Produces: `ProjectsPage({ onNavigate }: { onNavigate: (t: NavTarget) => void })`. `ProjectDetail({ project, onBack, onChanged, onOpenChat }: { project: Project; onBack: () => void; onChanged: () => Promise<void>; onOpenChat: (sessionId: string) => void })`. Project documents live in folder `` `/projects/${slug}` `` where `slug` = project name lowercased, non-alphanumerics → `-` (this makes the existing `doc_folder` permission scoping and `search_documents` folder filters work on project files for free).
+
+- [ ] **Step 1: ProjectsPage (list + create)**
+
+```tsx
+import { useCallback, useEffect, useState } from "react";
+import { Plus } from "lucide-react";
+import * as projectsRepo from "@/db/repo/projects";
+import type { Project } from "@/lib/schemas";
+import type { NavTarget } from "@/app/Sidebar";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { SESSION_COLORS } from "@/app/chat/InstancesSidebar";
+import { ProjectDetail } from "./ProjectDetail";
+
+export function ProjectsPage({
+    onNavigate,
 }: {
-    automation: Automation | null;
-    pipelines: Pipeline[];
-    levels: PermissionLevel[];
-    onDone: () => Promise<void>;
+    onNavigate: (t: NavTarget) => void;
 }) {
-    const [form, setForm] = useState<automationsRepo.AutomationInput>(() =>
-        automation
-            ? {
-                  name: automation.name,
-                  pipelineId: automation.pipeline_id,
-                  scheduleKind: automation.schedule_kind,
-                  intervalMinutes: automation.interval_minutes,
-                  timeOfDay: automation.time_of_day,
-                  dayOfWeek: automation.day_of_week,
-                  inputTemplate: automation.input_template,
-                  permissionLevelId: automation.permission_level_id,
-                  outputNoteFolder: automation.output_note_folder,
-              }
-            : {
-                  name: "",
-                  pipelineId: "",
-                  scheduleKind: "daily",
-                  intervalMinutes: null,
-                  timeOfDay: "09:00",
-                  dayOfWeek: null,
-                  inputTemplate: "",
-                  permissionLevelId: null,
-                  outputNoteFolder: "/automations",
-              },
-    );
+    const [projects, setProjects] = useState<Project[]>([]);
+    const [counts, setCounts] = useState<Record<string, projectsRepo.ProjectCounts>>({});
+    const [openId, setOpenId] = useState<string | null>(null);
+    const [name, setName] = useState("");
     const [error, setError] = useState<string | null>(null);
 
-    const save = async () => {
+    const reload = useCallback(async () => {
+        const list = await projectsRepo.listProjects();
+        setProjects(list);
+        const entries = await Promise.all(
+            list.map(async (p) => [p.id, await projectsRepo.projectCounts(p.id)] as const),
+        );
+        setCounts(Object.fromEntries(entries));
+    }, []);
+    useEffect(() => {
+        void reload();
+    }, [reload]);
+
+    const create = async () => {
         setError(null);
         try {
-            if (!form.pipelineId)
-                throw new Error("pick a pipeline for this automation");
-            if (automation)
-                await automationsRepo.updateAutomation(automation.id, form);
-            else await automationsRepo.createAutomation(form);
-            await onDone();
+            const color = SESSION_COLORS[projects.length % SESSION_COLORS.length]!;
+            const p = await projectsRepo.createProject({ name, color });
+            setName("");
+            await reload();
+            setOpenId(p.id);
         } catch (e) {
             setError(e instanceof Error ? e.message : String(e));
         }
     };
 
+    const open = openId ? projects.find((p) => p.id === openId) : undefined;
+    if (open) {
+        return (
+            <ProjectDetail
+                key={open.id}
+                project={open}
+                onBack={() => setOpenId(null)}
+                onChanged={reload}
+                onOpenChat={(sessionId) =>
+                    onNavigate({ page: "agents", tab: "chat", sessionId })
+                }
+            />
+        );
+    }
+
     return (
-        <Card>
-            <CardHeader>
-                <CardTitle>
-                    {automation ? `Edit ${automation.name}` : "New automation"}
-                </CardTitle>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-3">
-                <div className="flex gap-3">
+        <div className="h-full overflow-y-auto p-6">
+            <div className="mx-auto flex max-w-3xl flex-col gap-6">
+                <header>
+                    <h1 className="font-display text-2xl font-semibold tracking-wide">
+                        Projects
+                    </h1>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                        Group chats, files, and bookmarks around one goal. Each
+                        project is its own star on the chat constellation.
+                    </p>
+                </header>
+                {error && <p className="text-xs text-destructive">{error}</p>}
+                <div className="flex items-end gap-2">
                     <label className="flex flex-1 flex-col gap-1 text-sm">
-                        Name
+                        New project
                         <Input
-                            value={form.name}
-                            onChange={(e) =>
-                                setForm({ ...form, name: e.target.value })
-                            }
+                            value={name}
+                            placeholder="e.g. Apartment hunt"
+                            onChange={(e) => setName(e.target.value)}
+                            onKeyDown={(e) => {
+                                if (e.key === "Enter") void create();
+                            }}
                         />
                     </label>
-                    <label className="flex flex-1 flex-col gap-1 text-sm">
-                        Pipeline
-                        <Select
-                            value={form.pipelineId}
-                            onChange={(e) =>
-                                setForm({ ...form, pipelineId: e.target.value })
-                            }
-                        >
-                            <option value="">Select pipeline…</option>
-                            {pipelines.map((p) => (
-                                <option key={p.id} value={p.id}>
-                                    {p.name}
-                                </option>
-                            ))}
-                        </Select>
-                    </label>
-                </div>
-                <div className="flex gap-3">
-                    <label className="flex w-36 flex-col gap-1 text-sm">
-                        Schedule
-                        <Select
-                            value={form.scheduleKind}
-                            onChange={(e) =>
-                                setForm({
-                                    ...form,
-                                    scheduleKind: e.target
-                                        .value as ScheduleKind,
-                                })
-                            }
-                        >
-                            <option value="interval">Interval</option>
-                            <option value="daily">Daily</option>
-                            <option value="weekly">Weekly</option>
-                        </Select>
-                    </label>
-                    {form.scheduleKind === "interval" && (
-                        <label className="flex w-36 flex-col gap-1 text-sm">
-                            Every N minutes
-                            <Input
-                                type="number"
-                                min={1}
-                                value={form.intervalMinutes ?? ""}
-                                onChange={(e) =>
-                                    setForm({
-                                        ...form,
-                                        intervalMinutes: e.target.value
-                                            ? Number(e.target.value)
-                                            : null,
-                                    })
-                                }
-                            />
-                        </label>
-                    )}
-                    {form.scheduleKind !== "interval" && (
-                        <label className="flex w-32 flex-col gap-1 text-sm">
-                            Time (HH:MM)
-                            <Input
-                                value={form.timeOfDay ?? ""}
-                                placeholder="09:00"
-                                onChange={(e) =>
-                                    setForm({
-                                        ...form,
-                                        timeOfDay: e.target.value || null,
-                                    })
-                                }
-                            />
-                        </label>
-                    )}
-                    {form.scheduleKind === "weekly" && (
-                        <label className="flex w-32 flex-col gap-1 text-sm">
-                            Day
-                            <Select
-                                value={String(form.dayOfWeek ?? 1)}
-                                onChange={(e) =>
-                                    setForm({
-                                        ...form,
-                                        dayOfWeek: Number(e.target.value),
-                                    })
-                                }
-                            >
-                                {DAYS.map((d, i) => (
-                                    <option key={d} value={i}>
-                                        {d}
-                                    </option>
-                                ))}
-                            </Select>
-                        </label>
-                    )}
-                </div>
-                <label className="flex flex-col gap-1 text-sm">
-                    Input template ({"{{date}}"} available)
-                    <Input
-                        value={form.inputTemplate}
-                        placeholder="e.g. Summarize https://news.ycombinator.com for {{date}}"
-                        onChange={(e) =>
-                            setForm({ ...form, inputTemplate: e.target.value })
-                        }
-                    />
-                </label>
-                <div className="flex gap-3">
-                    <label className="flex flex-1 flex-col gap-1 text-sm">
-                        Permission level (out-of-level calls are denied)
-                        <Select
-                            value={form.permissionLevelId ?? ""}
-                            onChange={(e) =>
-                                setForm({
-                                    ...form,
-                                    permissionLevelId: e.target.value || null,
-                                })
-                            }
-                        >
-                            <option value="">None (deny all tool calls)</option>
-                            {levels.map((l) => (
-                                <option key={l.id} value={l.id}>
-                                    {l.name}
-                                </option>
-                            ))}
-                        </Select>
-                    </label>
-                    <label className="flex flex-1 flex-col gap-1 text-sm">
-                        Save output as note in folder (blank = don't)
-                        <Input
-                            value={form.outputNoteFolder ?? ""}
-                            placeholder="/automations"
-                            onChange={(e) =>
-                                setForm({
-                                    ...form,
-                                    outputNoteFolder: e.target.value || null,
-                                })
-                            }
-                        />
-                    </label>
-                </div>
-                <div className="flex items-center gap-3">
-                    <Button onClick={() => void save()}>Save</Button>
-                    <Button variant="ghost" onClick={() => void onDone()}>
-                        Cancel
+                    <Button onClick={() => void create()} aria-label="Create project">
+                        <Plus className="h-4 w-4" />
                     </Button>
-                    {error && (
-                        <span className="text-xs text-destructive">{error}</span>
+                </div>
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                    {projects.map((p) => {
+                        const c = counts[p.id];
+                        return (
+                            <Card
+                                key={p.id}
+                                corners
+                                className="cursor-pointer transition-colors hover:border-primary/40"
+                                style={{ borderLeft: `2px solid ${p.color ?? "var(--primary)"}` }}
+                                onClick={() => setOpenId(p.id)}
+                            >
+                                <CardHeader>
+                                    <CardTitle>{p.name}</CardTitle>
+                                    {p.description && (
+                                        <p className="text-xs text-muted-foreground">
+                                            {p.description}
+                                        </p>
+                                    )}
+                                </CardHeader>
+                                <CardContent>
+                                    <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                                        {c
+                                            ? `${c.sessions} chats · ${c.documents} files · ${c.bookmarks} bookmarks`
+                                            : "…"}
+                                    </span>
+                                </CardContent>
+                            </Card>
+                        );
+                    })}
+                    {projects.length === 0 && (
+                        <p className="text-sm text-muted-foreground">
+                            No projects yet — name one above.
+                        </p>
                     )}
                 </div>
-            </CardContent>
-        </Card>
+            </div>
+        </div>
     );
 }
 ```
 
-- [ ] **Step 3: Wire into `AgentsPage.tsx`**
+(`Card` extends `HTMLAttributes<HTMLDivElement>` and spreads all props — `onClick` and `style` pass through as written.)
 
-Replace `AutomationsPlaceholder` with `<AutomationsTab />`; delete the placeholder; add the import.
+- [ ] **Step 2: ProjectDetail**
+
+`src/app/projects/ProjectDetail.tsx` — one scrollable column with: identity header (editable name via the NotesPage transparent-Input pattern, description input, `SESSION_COLORS` swatch row calling `updateProject`), then four cards:
+
+1. **Files** — hidden `<input type="file" accept="application/pdf,.md,.txt" multiple>` + "Upload" button. Handler:
+
+```tsx
+    const slug = project.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+    const folder = `/projects/${slug}`;
+
+    const upload = async (files: FileList | null) => {
+        if (!files) return;
+        setError(null);
+        try {
+            for (const file of Array.from(files)) {
+                if (file.type === "application/pdf") {
+                    await ingestPdf({
+                        data: new Uint8Array(await file.arrayBuffer()),
+                        fileName: file.name,
+                        folder,
+                        projectId: project.id,
+                    });
+                } else {
+                    await insertDocument({
+                        title: file.name,
+                        contentText: await file.text(),
+                        mimeType: file.type || "text/plain",
+                        folder,
+                        sourceName: file.name,
+                        byteSize: file.size,
+                        projectId: project.id,
+                    });
+                }
+            }
+            await refreshDocs();
+        } catch (e) {
+            setError(e instanceof Error ? e.message : String(e));
+        }
+    };
+```
+
+`ingestPdf` (`src/ai/multimodal/pdf.ts:12`) already accepts `folder?: string`; add `projectId?: string | null` to its options and pass `projectId: opts.projectId ?? null` in its `insertDocument` call (line 22). File rows list title + size + delete button (`deleteDocument`).
+
+2. **Chats** — `listSessions({ projectId: project.id })` rows (title + relative time, click → `onOpenChat(s.id)`), plus a "New chat" row: preset `<Select>` (from `listPresets()`) + Button:
+
+```tsx
+    const newChat = async (preset: Preset) => {
+        const session = await sessionsRepo.createSession({
+            title: `${project.name} · ${preset.name}`,
+            presetId: preset.id,
+            permissionLevelId: preset.permission_level_id,
+            projectId: project.id,
+        });
+        onOpenChat(session.id);
+    };
+```
+
+3. **Bookmarks** — `listBookmarks({ projectId: project.id })` + the same add-row as BookmarksTab (project preset to this project, no project select).
+
+4. **Automations** — `listAutomations({ projectId: project.id })` read-only rows (name, schedule, enabled badge) + hint text: `"Create or edit automations in Agents → Automations and assign them to this project."`
+
+Footer: two-step delete button (same `confirmingId` pattern as `InstancesSidebar`) calling `deleteProject` then `onBack()` + `onChanged()`.
+
+- [ ] **Step 3: Wire into Shell/Sidebar/palette + automations form**
+
+- `Sidebar.tsx`: add `"projects"` to `Page`; Workspace section gets `{ page: "projects", label: "Projects", icon: FolderKanban }` first.
+- `Shell.tsx`: add `projects` to `PAGES` (any placeholder value is fine since the conditional handles it) and render `nav.page === "projects" ? <ProjectsPage onNavigate={setNav} /> : …`.
+- `CommandPalette.tsx`: add `{ target: { page: "projects" }, label: "Projects" }` after Home.
+- `AutomationsTab.tsx` form: below the permission level select, add a project `<Select>` fed by `listProjects()` (`"No project"` → null) writing `form.projectId`, passed through to the create/update repo calls.
 
 - [ ] **Step 4: Verify**
 
-Run: `npm run typecheck && npm test` — Expected: clean.
-Manual: create an automation on the digest pipeline with a permission level that grants `fetch_url` for the target domain and `write_note` for `/digests`, interval = 1 minute, enable it, wait ≤90s → a run appears in history and a note lands in `/digests`; remove the level → next run's history shows the denial-degraded output. Pause stops firing.
+Run: `npm run typecheck && npm test` → pass.
+Run: `npm run dev` → create a project; upload a PDF and a .md file (rows appear; the knowledge agent can `search_documents` them, scoped by the `/projects/<slug>` folder); start a project chat (lands in Agents → Chat with the session open); add a project bookmark (visible under Notes → Bookmarks when filtering by the project chip); delete the project (chats/bookmarks survive, unfiled).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/app/agents/ src/App.tsx
-git commit -m "feat: automations tab + scheduler wiring"
+git add -A src/app/projects src/app/Sidebar.tsx src/app/Shell.tsx \
+  src/components/palette/CommandPalette.tsx src/app/agents/AutomationsTab.tsx \
+  src/ai/multimodal/pdf.ts
+git commit -m "feat: Projects section — files, project chats, bookmarks, automations"
 ```
 
 ---
 
-## Final end-to-end verification (after Task 15)
+### Task 12: Universe network — project stars + archive layer
 
-1. `npm test && npm run typecheck` — everything green.
-2. `npm run eval` (needs a configured Gemini key or Ollama) — router eval still ≥85%.
-3. Fresh-profile launch (delete dev `dashboard.db` or use a clean browser profile): migrations 1–5 apply, builtin agents/presets/levels seed, chat + Study preset delegate as before.
-4. **Existing-profile launch** (the important one): pre-upgrade presets keep their agents — migration 0003 rewrote `"knowledge"` → `"agt_knowledge"`.
-5. The career loop demo: create a "Job scout" agent (fetch_url), a pipeline "scan postings → summarize → write_note to /career", an automation daily 09:00 with a level granting exactly those scopes. Next morning, ask the Study preset "what did my job scout find?" — the knowledge agent reads the note.
+The scaling fix from the todo: the sphere currently hard-caps at `MAX_SESSIONS = 10` and silently drops the rest. New model: **project hubs** (with session + document satellites) + the **most recent unfiled sessions** as their own stars + one **archive star** holding everything older, expandable in place.
 
-## Execution handoff
+**Files:**
+- Modify: `src/components/hud/networkData.ts` (new builder, kinds, remove `buildSessionNetwork`), `src/app/chat/ChatWorkspace.tsx` (data loading + archive toggle)
+- Test: `src/components/hud/networkData.test.ts` (new)
 
-Plan complete. Two execution options:
+**Interfaces:**
+- Produces:
+  - `NodeKind` becomes `"session" | "agent" | "tool" | "doc" | "project" | "archive"` (drop unused `"note"`).
+  - `buildUniverseNetwork(opts: { projects: Project[]; sessions: ChatSession[]; documents: Pick<Document, "id" | "title" | "project_id">[]; presets: Preset[]; agents: AgentDef[]; expanded: boolean }): Network`
+  - Node payloads: project hub → `{ project: Project }`; session node → the `ChatSession`; archive hub → `{ archive: true, count: number }`.
+  - Layout constants: `RECENT_HUBS = 8`, `PROJECT_SESSION_SAT = 6`, `PROJECT_DOC_SAT = 5`, `ARCHIVE_SAT = 24`.
 
-1. **Subagent-Driven (recommended)** — dispatch a fresh subagent per task with review between tasks (superpowers:subagent-driven-development).
-2. **Inline Execution** — execute task-by-task in one session with checkpoints (superpowers:executing-plans).
+- [ ] **Step 1: Write the failing tests**
+
+Create `src/components/hud/networkData.test.ts`:
+
+```ts
+import { describe, expect, it } from "vitest";
+import { buildUniverseNetwork } from "./networkData";
+import type { AgentDef, ChatSession, Preset, Project } from "@/lib/schemas";
+
+function session(id: string, over: Partial<ChatSession> = {}): ChatSession {
+    return {
+        id,
+        title: id,
+        preset_id: null,
+        permission_level_id: null,
+        compaction_summary: null,
+        project_id: null,
+        color: null,
+        created_at: 0,
+        updated_at: 0,
+        ...over,
+    };
+}
+
+function project(id: string, name: string): Project {
+    return {
+        id,
+        name,
+        description: null,
+        color: "#22d3ee",
+        created_at: 0,
+        updated_at: 0,
+    };
+}
+
+const base = {
+    presets: [] as Preset[],
+    agents: [] as AgentDef[],
+    documents: [] as { id: string; title: string; project_id: string | null }[],
+};
+
+describe("buildUniverseNetwork", () => {
+    it("makes one hub per project with doc satellites in its cluster", () => {
+        const p = project("prj_1", "Thesis");
+        const net = buildUniverseNetwork({
+            ...base,
+            projects: [p],
+            documents: [{ id: "doc_1", title: "spec.pdf", project_id: "prj_1" }],
+            sessions: [session("ses_1", { project_id: "prj_1" })],
+            expanded: false,
+        });
+        const hub = net.nodes.find((n) => n.kind === "project");
+        expect(hub).toBeDefined();
+        expect(hub!.label).toBe("Thesis");
+        const doc = net.nodes.find((n) => n.kind === "doc");
+        expect(doc!.parentId).toBe(hub!.id);
+        const ses = net.nodes.find((n) => n.kind === "session");
+        expect(ses!.parentId).toBe(hub!.id);
+    });
+
+    it("collapses old unfiled sessions into one archive star", () => {
+        const sessions = Array.from({ length: 12 }, (_, i) =>
+            session(`ses_${i}`, { updated_at: 100 - i }),
+        );
+        const net = buildUniverseNetwork({
+            ...base,
+            projects: [],
+            sessions,
+            expanded: false,
+        });
+        const hubs = net.nodes.filter((n) => n.kind === "session" && n.primary);
+        expect(hubs).toHaveLength(8); // RECENT_HUBS newest
+        const archive = net.nodes.find((n) => n.kind === "archive");
+        expect(archive).toBeDefined();
+        expect((archive!.payload as { count: number }).count).toBe(4);
+    });
+
+    it("expands the archive into session satellites", () => {
+        const sessions = Array.from({ length: 12 }, (_, i) =>
+            session(`ses_${i}`, { updated_at: 100 - i }),
+        );
+        const net = buildUniverseNetwork({
+            ...base,
+            projects: [],
+            sessions,
+            expanded: true,
+        });
+        const archive = net.nodes.find((n) => n.kind === "archive")!;
+        const archived = net.nodes.filter(
+            (n) => n.kind === "session" && n.parentId === archive.id,
+        );
+        expect(archived).toHaveLength(4);
+    });
+
+    it("omits the archive star when everything fits", () => {
+        const net = buildUniverseNetwork({
+            ...base,
+            projects: [],
+            sessions: [session("ses_1")],
+            expanded: false,
+        });
+        expect(net.nodes.find((n) => n.kind === "archive")).toBeUndefined();
+    });
+});
+```
+
+- [ ] **Step 2: Run to verify failure**
+
+Run: `npx vitest run src/components/hud/networkData.test.ts`
+Expected: FAIL — `buildUniverseNetwork` is not exported.
+
+- [ ] **Step 3: Implement the builder**
+
+In `networkData.ts`: update `NodeKind`, add imports (`Project`, `Document`), add constants, and replace `buildSessionNetwork` (delete it — ChatWorkspace is its only consumer) with:
+
+```ts
+export const RECENT_HUBS = 8;
+const PROJECT_SESSION_SAT = 6;
+const PROJECT_DOC_SAT = 5;
+const ARCHIVE_SAT = 24;
+const PROJECT_R = HUB_R + 0.5;
+const ARCHIVE_COLOR = "var(--muted-foreground)";
+
+/**
+ * The full chat universe: one star per project (sessions + files clustered
+ * around it), the newest unfiled sessions as their own stars, and everything
+ * older folded into a single expandable "archive" star — so the globe stays
+ * readable at any chat count.
+ */
+export function buildUniverseNetwork(opts: {
+    projects: Project[];
+    sessions: ChatSession[];
+    documents: Pick<Document, "id" | "title" | "project_id">[];
+    presets: Preset[];
+    agents: AgentDef[];
+    expanded: boolean;
+}): Network {
+    const presetById = new Map(opts.presets.map((p) => [p.id, p]));
+    const agentsById = new Map(opts.agents.map((a) => [a.id, a]));
+    const net: Network = { nodes: [], edges: [] };
+
+    const filed = opts.sessions.filter((s) => s.project_id !== null);
+    const unfiled = opts.sessions.filter((s) => s.project_id === null);
+    const recent = unfiled.slice(0, RECENT_HUBS);
+    const archived = unfiled.slice(RECENT_HUBS);
+
+    const hubCount =
+        opts.projects.length + recent.length + (archived.length > 0 ? 1 : 0);
+    const hubUnits = fibonacciSphere(hubCount);
+    let slot = 0;
+
+    // Project stars: files in close, chats orbiting.
+    for (const project of opts.projects) {
+        const unit = hubUnits[slot++]!;
+        const hubId = `project:${project.id}`;
+        const color = project.color ?? "var(--primary)";
+        const docs = opts.documents
+            .filter((d) => d.project_id === project.id)
+            .slice(0, PROJECT_DOC_SAT);
+        const sessions = filed
+            .filter((s) => s.project_id === project.id)
+            .slice(0, PROJECT_SESSION_SAT);
+        net.nodes.push({
+            id: hubId,
+            kind: "project",
+            label: project.name,
+            color,
+            unit,
+            r: PROJECT_R,
+            primary: true,
+            meta: {
+                title: project.name,
+                subtitle: project.description ?? "project",
+                chips: docs.map((d) => ({ label: d.title })),
+                foot: `${sessions.length} chats · ${docs.length} files`,
+            },
+            payload: { project },
+        });
+        docs.forEach((doc, i) => {
+            const dUnit = satelliteUnit(unit, i, docs.length, TOOL_SPREAD);
+            const id = `${hubId}:doc:${doc.id}`;
+            net.nodes.push({
+                id,
+                kind: "doc",
+                label: doc.title,
+                color,
+                unit: dUnit,
+                r: TOOL_R,
+                parentId: hubId,
+                primary: false,
+                meta: { title: doc.title, subtitle: `file · ${project.name}` },
+            });
+            net.edges.push({ a: hubId, b: id });
+        });
+        sessions.forEach((s, i) => {
+            const sUnit = satelliteUnit(unit, i, sessions.length, AGENT_SPREAD);
+            const preset = s.preset_id ? presetById.get(s.preset_id) : undefined;
+            const id = `session:${s.id}`;
+            net.nodes.push({
+                id,
+                kind: "session",
+                label: s.title,
+                color: sessionColor(s, preset, agentsById),
+                unit: sUnit,
+                r: AGENT_R,
+                parentId: hubId,
+                primary: true,
+                meta: {
+                    title: s.title,
+                    subtitle: preset ? preset.name : "no preset",
+                    foot: `updated ${relativeTime(s.updated_at)}`,
+                },
+                payload: s,
+            });
+            net.edges.push({ a: hubId, b: id });
+        });
+    }
+
+    // Recent unfiled sessions: their own stars with specialist satellites.
+    for (const s of recent) {
+        const unit = hubUnits[slot++]!;
+        const preset = s.preset_id ? presetById.get(s.preset_id) : undefined;
+        const defs = safeAgents(preset)
+            .map((id) => agentsById.get(id))
+            .filter((d): d is AgentDef => d !== undefined);
+        const hubId = `session:${s.id}`;
+        net.nodes.push({
+            id: hubId,
+            kind: "session",
+            label: s.title,
+            color: sessionColor(s, preset, agentsById),
+            unit,
+            r: HUB_R,
+            primary: true,
+            meta: {
+                title: s.title,
+                subtitle: preset
+                    ? `${preset.name} · ${preset.provider}/${preset.model}`
+                    : "no preset",
+                chips: defs.map((d) => {
+                    const info = agentInfo(d);
+                    return { label: info.slug, color: info.color };
+                }),
+                foot: `updated ${relativeTime(s.updated_at)}`,
+            },
+            payload: s,
+        });
+        defs.forEach((def, k) =>
+            attachAgent(net, hubId, unit, def, k, defs.length, hubId),
+        );
+    }
+
+    // The outskirts: older chats as one dim star; click to unfold them.
+    if (archived.length > 0) {
+        const unit = hubUnits[slot++]!;
+        const hubId = "archive";
+        net.nodes.push({
+            id: hubId,
+            kind: "archive",
+            label: `${archived.length} older`,
+            color: ARCHIVE_COLOR,
+            unit,
+            r: HUB_R,
+            primary: true,
+            meta: {
+                title: `${archived.length} older chats`,
+                subtitle: opts.expanded
+                    ? "Click a chat to open it · click here to fold them back."
+                    : "Click to unfold them onto the globe.",
+            },
+            payload: { archive: true, count: archived.length },
+        });
+        if (opts.expanded) {
+            const shown = archived.slice(0, ARCHIVE_SAT);
+            shown.forEach((s, i) => {
+                const sUnit = satelliteUnit(unit, i, shown.length, AGENT_SPREAD * 1.4);
+                const preset = s.preset_id ? presetById.get(s.preset_id) : undefined;
+                const id = `session:${s.id}`;
+                net.nodes.push({
+                    id,
+                    kind: "session",
+                    label: s.title,
+                    color: sessionColor(s, preset, agentsById),
+                    unit: sUnit,
+                    r: AGENT_R,
+                    parentId: hubId,
+                    primary: true,
+                    meta: {
+                        title: s.title,
+                        subtitle: preset ? preset.name : "no preset",
+                        foot: `updated ${relativeTime(s.updated_at)}`,
+                    },
+                    payload: s,
+                });
+                net.edges.push({ a: hubId, b: id });
+            });
+        }
+    }
+
+    return net;
+}
+```
+
+(Also delete the now-unused `MAX_SESSIONS` constant. Keep `buildAgentTypeNetwork` unchanged — the roster tab and the empty state still use it.)
+
+- [ ] **Step 4: Run tests**
+
+Run: `npx vitest run src/components/hud/networkData.test.ts`
+Expected: PASS.
+
+- [ ] **Step 5: Wire ChatWorkspace to the universe**
+
+In `ChatWorkspace.tsx`:
+- New state: `const [projects, setProjects] = useState<Project[]>([]);`, `const [docs, setDocs] = useState<Pick<Document, "id" | "title" | "project_id">[]>([]);`, `const [archiveOpen, setArchiveOpen] = useState(false);`
+- Extend the initial load effect: `setProjects(await listProjects());` and `setDocs(await listDocuments());` (`listDocuments()` already returns metadata with empty `content_text`).
+- Replace the `network` memo:
+
+```tsx
+    const network = useMemo(
+        () =>
+            sessions.length || projects.length
+                ? buildUniverseNetwork({
+                      projects,
+                      sessions,
+                      documents: docs,
+                      presets,
+                      agents,
+                      expanded: archiveOpen,
+                  })
+                : buildAgentTypeNetwork(agents),
+        [sessions, projects, docs, presets, agents, archiveOpen],
+    );
+```
+
+- Extend `openFromNode`:
+
+```tsx
+            if (node.kind === "archive") {
+                setArchiveOpen((v) => !v);
+                return;
+            }
+            if (node.kind === "project") {
+                return; // project stars are context; management lives in Projects
+            }
+```
+
+(before the existing `session` branch). Add an `onOpenProject?: (projectId: string) => void` prop later only if navigation from the star is wanted — YAGNI for now; the hover card explains the star.)
+- `sessionIdOf` already resolves `parentId` prefixed `session:` — extend it so archive/project children map correctly (session nodes under hubs still have `kind === "session"`, handled by the first branch; no change needed — verify with hover).
+- Sidebar grouping: in `InstancesSidebar`, group the session list — for each project (passed in as a new `projects: Project[]` prop) render a mono-uppercase header row (project name, colored dot) above its sessions, then an `"Unfiled"` header above the rest. Pure presentational partition of the existing `sessions.map` (two passes over the same row-rendering code, extracted into a local `Row` closure).
+
+- [ ] **Step 6: Verify**
+
+Run: `npm run typecheck && npm test` → pass.
+Run: `npm run dev` → seed ~15 chats + 1 project with a file: globe shows the project star (file + chats around it), 8 recent stars, and one dim "N older" star; clicking it unfolds/refolds the archive ring; every session node opens its chat; hover-sync with the sidebar rows still works.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add src/components/hud/networkData.ts src/components/hud/networkData.test.ts \
+  src/app/chat/ChatWorkspace.tsx src/app/chat/InstancesSidebar.tsx
+git commit -m "feat: universe network — project stars + expandable archive layer"
+```
+
+---
+
+### Task 13: Pipelines without `{{}}` — template chips + plain-language copy
+
+The `{{input}}` syntax stays as storage format (the runner and `lib/template.ts` are untouched); users stop typing it.
+
+**Files:**
+- Modify: `src/app/agents/PipelinesTab.tsx`, `src/app/agents/AutomationsTab.tsx:340-349`
+
+**Interfaces:**
+- Produces (local to PipelinesTab): `TemplateChips({ tokens, onInsert }: { tokens: { token: string; label: string }[]; onInsert: (token: string) => void })`.
+
+- [ ] **Step 1: Add the chips + cursor insertion**
+
+In `PipelinesTab.tsx` add above `PipelineEditor`:
+
+```tsx
+function TemplateChips({
+    tokens,
+    onInsert,
+}: {
+    tokens: { token: string; label: string }[];
+    onInsert: (token: string) => void;
+}) {
+    return (
+        <div className="flex flex-wrap items-center gap-1">
+            <span className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground">
+                insert
+            </span>
+            {tokens.map((t) => (
+                <button
+                    key={t.token}
+                    type="button"
+                    onClick={() => onInsert(t.token)}
+                    className="cursor-pointer rounded-sm border border-border px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground transition-colors hover:border-primary/50 hover:text-primary"
+                >
+                    {t.label}
+                </button>
+            ))}
+        </div>
+    );
+}
+```
+
+In `PipelineEditor`, keep a ref per step textarea and insert at the cursor:
+
+```tsx
+    const taRefs = useRef<(HTMLTextAreaElement | null)[]>([]);
+
+    const insertToken = (i: number, token: string) => {
+        const ta = taRefs.current[i];
+        const cur = steps[i]!.promptTemplate;
+        if (!ta) {
+            setStep(i, { promptTemplate: cur + token });
+            return;
+        }
+        const start = ta.selectionStart ?? cur.length;
+        const end = ta.selectionEnd ?? cur.length;
+        setStep(i, {
+            promptTemplate: cur.slice(0, start) + token + cur.slice(end),
+        });
+        requestAnimationFrame(() => {
+            ta.focus();
+            ta.selectionStart = ta.selectionEnd = start + token.length;
+        });
+    };
+```
+
+Attach `ref={(el) => { taRefs.current[i] = el; }}` to each step `<Textarea>`, and under it render:
+
+```tsx
+                        <TemplateChips
+                            tokens={[
+                                { token: "{{input}}", label: "run input" },
+                                ...(i > 0
+                                    ? [{ token: "{{prev}}", label: "previous step" }]
+                                    : []),
+                                ...steps.slice(0, i).map((_, j) => ({
+                                    token: `{{step${j + 1}}}`,
+                                    label: `step ${j + 1} output`,
+                                })),
+                                { token: "{{date}}", label: "today's date" },
+                            ]}
+                            onInsert={(t) => insertToken(i, t)}
+                        />
+```
+
+- [ ] **Step 2: Rewrite the jargon copy**
+
+- Editor header hint (lines 260–263) → `"Steps run top to bottom. Each step sends its prompt to one agent. Use the insert buttons to reference the run input or an earlier step's output — no syntax to memorize."`
+- Run-input label (line 97) → `"What should this run start with?"` with the same placeholder.
+- Step textarea placeholder → `"What should this agent do? e.g. Summarize the key points of {{prev}}"`.
+- New-step default template stays `"{{prev}}"`.
+- In `AutomationsTab.tsx:341`, label `"Input template ({{date}} available)"` → `"What each run starts with"` and add under the Input: `<TemplateChips tokens={[{ token: "{{date}}", label: "today's date" }]} onInsert={(t) => setForm({ ...form, inputTemplate: form.inputTemplate + t })} />` (export `TemplateChips` from PipelinesTab and import it, keeping one implementation).
+
+- [ ] **Step 3: Verify**
+
+Run: `npm run typecheck && npm test` → pass.
+Run: `npm run dev` → chips insert at the cursor and re-focus; step 1 offers no "previous step"; step 3 offers "step 1 output" and "step 2 output"; a run still resolves templates exactly as before (`lib/template.ts` untouched).
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add src/app/agents/PipelinesTab.tsx src/app/agents/AutomationsTab.tsx
+git commit -m "feat: pipeline template chips — no more hand-typed {{}} syntax"
+```
+
+---
+
+### Task 14: Final verification + docs
+
+**Files:**
+- Modify: `docs/architecture.md` (repo-layout block), `docs/todo.md` (check off items)
+
+- [ ] **Step 1: Full gates**
+
+Run: `npm run typecheck` → exit 0.
+Run: `npm test` → all suites pass.
+Run: `npm run build` → completes (this also type-checks and tree-shakes the web target; catches any dangling import from the moves/deletes).
+
+- [ ] **Step 2: Manual QA sweep (`npm run dev`)**
+
+Walk the todo list end-to-end:
+1. Composer: placeholder/button baseline aligned; grows/shrinks. ✔ UI-1
+2. Background + sphere stars: soft halos, tapered spikes, nothing "two hard lines". ✔ UI-2
+3. Chat permission dropdown: exactly one "Ask everything". ✔ UX-1
+4. Chat lives under Agents → Chat; sidebar has no standalone Chat/Library/Tasks/Applications/Review entries. ✔ UX-2/3
+5. Courses only appear inside Planner → Calendar; no student copy on general surfaces. ✔ UX-4
+6. Agents tabs carry plain-language blurbs; pipeline chips replace `{{}}` typing. ✔ UX-5
+7. 15+ chats: globe shows recent stars + archive star that unfolds; project star shows files in the middle ring. ✔ UX-6, Feature-2
+8. Rename + recolor a chat from the sidebar. ✔ Feature-1
+9. Project flow: create → upload files → project chat → project bookmark → delete project unfiles everything. ✔ Feature-2
+10. Filter chips on bookmarks (groups + projects), snippets (groups), tasks (courses). ✔ Feature-3
+11. `prefers-reduced-motion`: sphere static but hover/click still work.
+12. Keyboard: tab through sidebar, tab bars, chips; ⌘K deep-links to every tab.
+
+- [ ] **Step 3: Update docs**
+
+- `docs/architecture.md` repo-layout block: replace the `app/` line with `app/  Shell + sections: home/, agents/ (chat, roster, pipelines, automations), projects/, notes/ (notes, bookmarks, snippets), planner/ (tasks, calendar, applications, review), presets/, permissions/, settings/`.
+- `docs/todo.md`: mark each line done (`- [x] …`) or delete resolved entries, keeping any follow-up ideas.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add docs/architecture.md docs/todo.md
+git commit -m "docs: record the section IA and close out todo.md"
+```
+
+---
+
+## Self-Review (performed while writing)
+
+**Spec coverage** — every `docs/todo.md` line maps to a task:
+
+| todo.md item | Task(s) |
+| --- | --- |
+| Composer offset | 1 |
+| Stars too simplistic/intrusive | 2 |
+| Duplicate "Ask Everything" | 3 |
+| Chat part of agents section | 10 |
+| Unify sections (calendar/notes/agents) | 8, 9, 10 |
+| Courses too student-targeted, keep under calendar | 7 (copy), 9 |
+| Agents/pipelines confusing, `{{input}}` | 10 (blurbs), 13 |
+| Neural net doesn't scale (layers/outskirts) | 12 |
+| Customize chats (rename/recolor), notes | 6 (chats), 8 (bookmark/snippet editing; note rename already exists) |
+| Projects (files, chats, automations, star, project bookmarks) | 4, 5, 11, 12 |
+| Filter by category (bookmarks, snippets, tasks) | 7, 8 |
+
+**Known judgment calls** (flag to the user, don't silently decide differently):
+- "Applications and notes aren't separate" is read as *too many top-level pages*; Applications lands in Planner (deadline-shaped), not Notes.
+- Projects **are** usable as categories via the bookmark project filter *and* have project-unique bookmarks in the detail view — the todo offered either; this does both cheaply.
+- Project stars don't navigate on click (hover explains them); chats/archive nodes do. Revisit if it feels dead.
+- `notes.project_id` deliberately skipped (YAGNI; todo doesn't ask for project notes).
+
+**Placeholder scan** — no TBDs; the three "follow the file's existing conventions" spots (automations repo inputs, ApplicationsTab/ReviewTab wrapper strip, db.test.ts assertion shape) point at concrete files/lines the implementer must read anyway because this plan intentionally doesn't paste 400-line files it only trims.
+
+**Type consistency** — checked: `sessionColor(session, preset, agentsById)` used in Tasks 6 and 12; `NavTarget { page, tab?, sessionId? }` grows in 8 → 10 → 11 in that order; `listSessions({projectId})`/`createSession({projectId})` defined in 4–5, consumed in 11–12; `SESSION_COLORS` exported in 6, imported in 11; `TabBar` extracted in 8, consumed in 9–10; `PermissionLevelSelect` value/onChange is `string | null` at all four call sites.
