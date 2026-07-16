@@ -25,11 +25,15 @@ import * as messagesRepo from "@/db/repo/messages";
 import { getPreset, listPresets } from "@/db/repo/presets";
 import { listLevels } from "@/db/repo/permissions";
 import { listAgents } from "@/db/repo/agents";
+import { listProjects } from "@/db/repo/projects";
+import { listDocuments } from "@/db/repo/documents";
 import type {
     AgentDef,
     ChatSession,
+    Document,
     PermissionLevel,
     Preset,
+    Project,
 } from "@/lib/schemas";
 import { MessageList } from "@/components/chat/MessageList";
 import { Composer } from "@/components/chat/Composer";
@@ -38,7 +42,7 @@ import { TokenMeter } from "@/components/chat/TokenMeter";
 import { NetworkSphere } from "@/components/hud/NetworkSphere";
 import {
     buildAgentTypeNetwork,
-    buildSessionNetwork,
+    buildUniverseNetwork,
 } from "@/components/hud/networkData";
 import { Typewriter } from "@/components/hud/Typewriter";
 import { PermissionLevelSelect } from "@/components/PermissionLevelSelect";
@@ -62,6 +66,11 @@ export function ChatWorkspace({
     const [presets, setPresets] = useState<Preset[]>([]);
     const [levels, setLevels] = useState<PermissionLevel[]>([]);
     const [agents, setAgents] = useState<AgentDef[]>([]);
+    const [projects, setProjects] = useState<Project[]>([]);
+    const [docs, setDocs] = useState<
+        Pick<Document, "id" | "title" | "project_id">[]
+    >([]);
+    const [archiveOpen, setArchiveOpen] = useState(false);
     const [active, setActive] = useState<ActiveChat | null>(null);
     const [error, setError] = useState<string | null>(null);
     // Session id highlighted by hovering a sphere node or a sidebar row.
@@ -75,6 +84,8 @@ export function ChatWorkspace({
             setPresets(await listPresets());
             setLevels(await listLevels());
             setAgents(await listAgents());
+            setProjects(await listProjects());
+            setDocs(await listDocuments());
         })();
     }, []);
 
@@ -139,18 +150,32 @@ export function ChatWorkspace({
         [openSession],
     );
 
-    // No chat selected → a network of existing sessions (agent instances); with
-    // none yet, the static agent-type topology as an intro.
+    // No chat selected → the universe: project stars, recent chats, and an
+    // archive star; with nothing yet, the static agent-type topology as an intro.
     const network = useMemo(
         () =>
-            sessions.length
-                ? buildSessionNetwork(sessions, presets, agents)
+            sessions.length || projects.length
+                ? buildUniverseNetwork({
+                      projects,
+                      sessions,
+                      documents: docs,
+                      presets,
+                      agents,
+                      expanded: archiveOpen,
+                  })
                 : buildAgentTypeNetwork(agents),
-        [sessions, presets, agents],
+        [sessions, projects, docs, presets, agents, archiveOpen],
     );
 
     const openFromNode = useCallback(
         (node: { kind: string; payload?: unknown }) => {
+            if (node.kind === "archive") {
+                setArchiveOpen((v) => !v);
+                return;
+            }
+            if (node.kind === "project") {
+                return; // project stars are context; management lives in Projects
+            }
             if (node.kind === "session") {
                 void openSession(node.payload as ChatSession);
                 return;
@@ -210,6 +235,7 @@ export function ChatWorkspace({
         <div className="flex h-full">
             <InstancesSidebar
                 sessions={sessions}
+                projects={projects}
                 presets={presets}
                 levels={levels}
                 agents={agents}

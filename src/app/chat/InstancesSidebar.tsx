@@ -16,6 +16,7 @@ import type {
     ChatSession,
     PermissionLevel,
     Preset,
+    Project,
 } from "@/lib/schemas";
 import { sessionMessageCount } from "@/db/repo/messages";
 import { agentColor } from "@/components/hud/AgentNode";
@@ -35,6 +36,7 @@ export const SESSION_COLORS = [
  */
 export function InstancesSidebar({
     sessions,
+    projects,
     presets,
     levels,
     agents,
@@ -48,6 +50,7 @@ export function InstancesSidebar({
     onRecolor,
 }: {
     sessions: ChatSession[];
+    projects: Project[];
     presets: Preset[];
     levels: PermissionLevel[];
     agents: AgentDef[];
@@ -95,6 +98,227 @@ export function InstancesSidebar({
     useEffect(() => {
         if (highlightId) rowRefs.current[highlightId]?.scrollIntoView({ block: "nearest" });
     }, [highlightId]);
+
+    // Grouped list: each project's chats under a header, then the unfiled rest.
+    const projectIds = new Set(projects.map((p) => p.id));
+    const groups = projects
+        .map((p) => ({
+            project: p,
+            rows: sessions.filter((s) => s.project_id === p.id),
+        }))
+        .filter((g) => g.rows.length > 0);
+    const unfiled = sessions.filter(
+        (s) => s.project_id === null || !projectIds.has(s.project_id),
+    );
+
+    /** One session row — shared by the project groups and the unfiled list. */
+    const Row = (s: ChatSession) => {
+        const preset = s.preset_id
+            ? presetById.get(s.preset_id)
+            : undefined;
+        const color = sessionColor(s, preset, agentsById);
+        const active = activeId === s.id;
+        const highlit = highlightId === s.id;
+        const expanded = expandedId === s.id;
+        const agentDefs = preset
+            ? safeAgents(preset)
+                  .map((id) => agentsById.get(id))
+                  .filter((d): d is AgentDef => d !== undefined)
+            : [];
+        return (
+            <div
+                key={s.id}
+                ref={(el) => {
+                    rowRefs.current[s.id] = el;
+                }}
+                onPointerEnter={() => onHover(s.id)}
+                onPointerLeave={() => onHover(null)}
+                className={cn(
+                    "mb-1 rounded-md border transition-colors",
+                    active
+                        ? "border-primary/40 bg-primary/10"
+                        : highlit
+                          ? "border-primary/30 bg-primary/5"
+                          : "border-transparent hover:bg-muted/50",
+                )}
+            >
+                <div className="flex items-center gap-2 px-2 py-1.5">
+                    <span
+                        className="h-2.5 w-2.5 shrink-0 rounded-full"
+                        style={{ background: color }}
+                        aria-hidden
+                    />
+                    {renamingId === s.id ? (
+                        <input
+                            autoFocus
+                            value={draftTitle}
+                            onChange={(e) => setDraftTitle(e.target.value)}
+                            onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                    renameHandledRef.current = true;
+                                    onRename(s, draftTitle.trim() || s.title);
+                                    setRenamingId(null);
+                                }
+                                if (e.key === "Escape") {
+                                    renameHandledRef.current = true;
+                                    setRenamingId(null);
+                                }
+                            }}
+                            onBlur={() => {
+                                if (renameHandledRef.current) {
+                                    renameHandledRef.current = false;
+                                    return;
+                                }
+                                onRename(s, draftTitle.trim() || s.title);
+                                setRenamingId(null);
+                            }}
+                            className="min-w-0 flex-1 rounded-sm border border-primary/40 bg-transparent px-1 py-0.5 text-xs focus-visible:outline-none"
+                        />
+                    ) : (
+                        <button
+                            onClick={() => onOpen(s)}
+                            className="min-w-0 flex-1 text-left"
+                        >
+                            <div className="truncate text-xs text-foreground">
+                                {s.title}
+                            </div>
+                            <div className="truncate font-mono text-[10px] text-muted-foreground">
+                                {preset
+                                    ? preset.name
+                                    : "no preset"}
+                            </div>
+                        </button>
+                    )}
+
+                    {confirmingId === s.id ? (
+                        <div className="flex items-center gap-0.5">
+                            <IconButton
+                                label="Confirm delete"
+                                onClick={() => {
+                                    setConfirmingId(null);
+                                    onDelete(s);
+                                }}
+                                className="text-destructive hover:text-destructive"
+                            >
+                                <Check className="h-3.5 w-3.5" />
+                            </IconButton>
+                            <IconButton
+                                label="Cancel delete"
+                                onClick={() => setConfirmingId(null)}
+                            >
+                                <X className="h-3.5 w-3.5" />
+                            </IconButton>
+                        </div>
+                    ) : (
+                        <div className="flex items-center gap-0.5">
+                            <IconButton
+                                label="Rename chat"
+                                onClick={() => {
+                                    renameHandledRef.current = false;
+                                    setRenamingId(s.id);
+                                    setDraftTitle(s.title);
+                                }}
+                            >
+                                <Pencil className="h-3.5 w-3.5" />
+                            </IconButton>
+                            <IconButton
+                                label="Delete chat"
+                                onClick={() => setConfirmingId(s.id)}
+                            >
+                                <Trash2 className="h-3.5 w-3.5" />
+                            </IconButton>
+                            <IconButton
+                                label={
+                                    expanded ? "Hide details" : "Show details"
+                                }
+                                onClick={() => toggleExpand(s.id)}
+                            >
+                                {expanded ? (
+                                    <ChevronDown className="h-3.5 w-3.5" />
+                                ) : (
+                                    <ChevronRight className="h-3.5 w-3.5" />
+                                )}
+                            </IconButton>
+                        </div>
+                    )}
+                </div>
+
+                {expanded && (
+                    <div className="flex flex-col gap-1.5 border-t border-border/60 px-3 py-2 text-[11px]">
+                        <Detail label="Model">
+                            {preset
+                                ? `${preset.provider}/${preset.model}`
+                                : "—"}
+                        </Detail>
+                        <Detail label="Agents">
+                            {agentDefs.length ? (
+                                <div className="flex flex-wrap gap-1">
+                                    {agentDefs.map((a) => {
+                                        const slug = agentSlug(
+                                            a.name,
+                                        );
+                                        const c =
+                                            a.color ??
+                                            agentColor(slug);
+                                        return (
+                                            <span
+                                                key={a.id}
+                                                className="rounded-sm px-1 py-0.5 font-mono text-[9px]"
+                                                style={{
+                                                    color: c,
+                                                    background: `color-mix(in oklab, ${c} 15%, transparent)`,
+                                                }}
+                                            >
+                                                {slug}
+                                            </span>
+                                        );
+                                    })}
+                                </div>
+                            ) : (
+                                "orchestrator only"
+                            )}
+                        </Detail>
+                        <Detail label="Permissions">
+                            {s.permission_level_id
+                                ? (levelById.get(s.permission_level_id)?.name ??
+                                  "custom")
+                                : "Ask everything"}
+                        </Detail>
+                        <Detail label="Messages">
+                            {counts[s.id] ?? "…"}
+                        </Detail>
+                        <Detail label="Updated">
+                            {relativeTime(s.updated_at)}
+                        </Detail>
+                        <Detail label="Color">
+                            <div className="flex flex-wrap justify-end gap-1">
+                                {SESSION_COLORS.map((c) => (
+                                    <button
+                                        key={c}
+                                        aria-label={`Set color ${c}`}
+                                        onClick={() => onRecolor(s, c)}
+                                        className={cn(
+                                            "h-3.5 w-3.5 cursor-pointer rounded-full border border-transparent hover:scale-110",
+                                            s.color === c &&
+                                                "ring-1 ring-foreground/60",
+                                        )}
+                                        style={{ background: c }}
+                                    />
+                                ))}
+                                <button
+                                    aria-label="Automatic color"
+                                    onClick={() => onRecolor(s, null)}
+                                    className="rounded-sm px-1 font-mono text-[9px] uppercase text-muted-foreground hover:text-foreground"
+                                >
+                                    auto
+                                </button>
+                            </div>
+                        </Detail>
+                    </div>
+                )}
+            </div>
+        );
+    };
 
     if (collapsed) {
         return (
@@ -168,213 +392,18 @@ export function InstancesSidebar({
                         No chats yet. Start one from a preset above.
                     </p>
                 )}
-                {sessions.map((s) => {
-                    const preset = s.preset_id
-                        ? presetById.get(s.preset_id)
-                        : undefined;
-                    const color = sessionColor(s, preset, agentsById);
-                    const active = activeId === s.id;
-                    const highlit = highlightId === s.id;
-                    const expanded = expandedId === s.id;
-                    const agentDefs = preset
-                        ? safeAgents(preset)
-                              .map((id) => agentsById.get(id))
-                              .filter((d): d is AgentDef => d !== undefined)
-                        : [];
-                    return (
-                        <div
-                            key={s.id}
-                            ref={(el) => {
-                                rowRefs.current[s.id] = el;
-                            }}
-                            onPointerEnter={() => onHover(s.id)}
-                            onPointerLeave={() => onHover(null)}
-                            className={cn(
-                                "mb-1 rounded-md border transition-colors",
-                                active
-                                    ? "border-primary/40 bg-primary/10"
-                                    : highlit
-                                      ? "border-primary/30 bg-primary/5"
-                                      : "border-transparent hover:bg-muted/50",
-                            )}
-                        >
-                            <div className="flex items-center gap-2 px-2 py-1.5">
-                                <span
-                                    className="h-2.5 w-2.5 shrink-0 rounded-full"
-                                    style={{ background: color }}
-                                    aria-hidden
-                                />
-                                {renamingId === s.id ? (
-                                    <input
-                                        autoFocus
-                                        value={draftTitle}
-                                        onChange={(e) => setDraftTitle(e.target.value)}
-                                        onKeyDown={(e) => {
-                                            if (e.key === "Enter") {
-                                                renameHandledRef.current = true;
-                                                onRename(s, draftTitle.trim() || s.title);
-                                                setRenamingId(null);
-                                            }
-                                            if (e.key === "Escape") {
-                                                renameHandledRef.current = true;
-                                                setRenamingId(null);
-                                            }
-                                        }}
-                                        onBlur={() => {
-                                            if (renameHandledRef.current) {
-                                                renameHandledRef.current = false;
-                                                return;
-                                            }
-                                            onRename(s, draftTitle.trim() || s.title);
-                                            setRenamingId(null);
-                                        }}
-                                        className="min-w-0 flex-1 rounded-sm border border-primary/40 bg-transparent px-1 py-0.5 text-xs focus-visible:outline-none"
-                                    />
-                                ) : (
-                                    <button
-                                        onClick={() => onOpen(s)}
-                                        className="min-w-0 flex-1 text-left"
-                                    >
-                                        <div className="truncate text-xs text-foreground">
-                                            {s.title}
-                                        </div>
-                                        <div className="truncate font-mono text-[10px] text-muted-foreground">
-                                            {preset
-                                                ? preset.name
-                                                : "no preset"}
-                                        </div>
-                                    </button>
-                                )}
-
-                                {confirmingId === s.id ? (
-                                    <div className="flex items-center gap-0.5">
-                                        <IconButton
-                                            label="Confirm delete"
-                                            onClick={() => {
-                                                setConfirmingId(null);
-                                                onDelete(s);
-                                            }}
-                                            className="text-destructive hover:text-destructive"
-                                        >
-                                            <Check className="h-3.5 w-3.5" />
-                                        </IconButton>
-                                        <IconButton
-                                            label="Cancel delete"
-                                            onClick={() => setConfirmingId(null)}
-                                        >
-                                            <X className="h-3.5 w-3.5" />
-                                        </IconButton>
-                                    </div>
-                                ) : (
-                                    <div className="flex items-center gap-0.5">
-                                        <IconButton
-                                            label="Rename chat"
-                                            onClick={() => {
-                                                renameHandledRef.current = false;
-                                                setRenamingId(s.id);
-                                                setDraftTitle(s.title);
-                                            }}
-                                        >
-                                            <Pencil className="h-3.5 w-3.5" />
-                                        </IconButton>
-                                        <IconButton
-                                            label="Delete chat"
-                                            onClick={() => setConfirmingId(s.id)}
-                                        >
-                                            <Trash2 className="h-3.5 w-3.5" />
-                                        </IconButton>
-                                        <IconButton
-                                            label={
-                                                expanded ? "Hide details" : "Show details"
-                                            }
-                                            onClick={() => toggleExpand(s.id)}
-                                        >
-                                            {expanded ? (
-                                                <ChevronDown className="h-3.5 w-3.5" />
-                                            ) : (
-                                                <ChevronRight className="h-3.5 w-3.5" />
-                                            )}
-                                        </IconButton>
-                                    </div>
-                                )}
-                            </div>
-
-                            {expanded && (
-                                <div className="flex flex-col gap-1.5 border-t border-border/60 px-3 py-2 text-[11px]">
-                                    <Detail label="Model">
-                                        {preset
-                                            ? `${preset.provider}/${preset.model}`
-                                            : "—"}
-                                    </Detail>
-                                    <Detail label="Agents">
-                                        {agentDefs.length ? (
-                                            <div className="flex flex-wrap gap-1">
-                                                {agentDefs.map((a) => {
-                                                    const slug = agentSlug(
-                                                        a.name,
-                                                    );
-                                                    const c =
-                                                        a.color ??
-                                                        agentColor(slug);
-                                                    return (
-                                                        <span
-                                                            key={a.id}
-                                                            className="rounded-sm px-1 py-0.5 font-mono text-[9px]"
-                                                            style={{
-                                                                color: c,
-                                                                background: `color-mix(in oklab, ${c} 15%, transparent)`,
-                                                            }}
-                                                        >
-                                                            {slug}
-                                                        </span>
-                                                    );
-                                                })}
-                                            </div>
-                                        ) : (
-                                            "orchestrator only"
-                                        )}
-                                    </Detail>
-                                    <Detail label="Permissions">
-                                        {s.permission_level_id
-                                            ? (levelById.get(s.permission_level_id)?.name ??
-                                              "custom")
-                                            : "Ask everything"}
-                                    </Detail>
-                                    <Detail label="Messages">
-                                        {counts[s.id] ?? "…"}
-                                    </Detail>
-                                    <Detail label="Updated">
-                                        {relativeTime(s.updated_at)}
-                                    </Detail>
-                                    <Detail label="Color">
-                                        <div className="flex flex-wrap justify-end gap-1">
-                                            {SESSION_COLORS.map((c) => (
-                                                <button
-                                                    key={c}
-                                                    aria-label={`Set color ${c}`}
-                                                    onClick={() => onRecolor(s, c)}
-                                                    className={cn(
-                                                        "h-3.5 w-3.5 cursor-pointer rounded-full border border-transparent hover:scale-110",
-                                                        s.color === c &&
-                                                            "ring-1 ring-foreground/60",
-                                                    )}
-                                                    style={{ background: c }}
-                                                />
-                                            ))}
-                                            <button
-                                                aria-label="Automatic color"
-                                                onClick={() => onRecolor(s, null)}
-                                                className="rounded-sm px-1 font-mono text-[9px] uppercase text-muted-foreground hover:text-foreground"
-                                            >
-                                                auto
-                                            </button>
-                                        </div>
-                                    </Detail>
-                                </div>
-                            )}
-                        </div>
-                    );
-                })}
+                {groups.map(({ project, rows }) => (
+                    <div key={project.id}>
+                        <GroupHeader color={project.color ?? "var(--primary)"}>
+                            {project.name}
+                        </GroupHeader>
+                        {rows.map(Row)}
+                    </div>
+                ))}
+                {groups.length > 0 && unfiled.length > 0 && (
+                    <GroupHeader>Unfiled</GroupHeader>
+                )}
+                {unfiled.map(Row)}
             </div>
         </div>
     );
@@ -386,6 +415,28 @@ function safeAgents(preset: Preset): string[] {
     } catch {
         return [];
     }
+}
+
+/** Section header for a project group (colored dot) or the unfiled rest. */
+function GroupHeader({
+    color,
+    children,
+}: {
+    color?: string;
+    children: React.ReactNode;
+}) {
+    return (
+        <div className="flex items-center gap-1.5 px-2 pb-1 pt-2 font-mono text-[9px] uppercase tracking-[0.18em] text-muted-foreground/70">
+            {color && (
+                <span
+                    className="h-1.5 w-1.5 shrink-0 rounded-full"
+                    style={{ background: color }}
+                    aria-hidden
+                />
+            )}
+            <span className="truncate">{children}</span>
+        </div>
+    );
 }
 
 function Detail({

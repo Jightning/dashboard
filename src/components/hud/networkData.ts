@@ -4,16 +4,16 @@
  * the unit sphere; satellites (an instance's specialists + their tools) cluster
  * around their hub via tangent-plane offsets.
  *
- * The node model is deliberately extensible (`kind` includes 'doc' | 'note') so
- * a future `buildFolderNetwork(agent, folder)` can emit file/context satellites
- * from listDocuments/listNotes without touching this component.
+ * The universe view groups everything by project: one star per project with
+ * its sessions and files clustered around it, the newest unfiled sessions as
+ * their own stars, and older ones folded into a single expandable archive star.
  */
-import type { ChatSession, Preset } from "@/lib/schemas";
+import type { ChatSession, Document, Preset, Project } from "@/lib/schemas";
 import { agentSlug, agentToolNames, presetAgents, type AgentDef } from "@/lib/schemas";
 import { agentColor } from "./AgentNode";
 import { fibonacciSphere, tangentOffset, type Vec3 } from "./sphere";
 
-export type NodeKind = "session" | "agent" | "tool" | "doc" | "note";
+export type NodeKind = "session" | "agent" | "tool" | "doc" | "project" | "archive";
 
 export interface NodeMeta {
     title: string;
@@ -167,43 +167,126 @@ export function relativeTime(ts: number): string {
     return RELATIVE.format(Math.round(sec / 86400), "day");
 }
 
-/** Cap so the globe stays readable and cheap. */
-const MAX_SESSIONS = 10;
+export const RECENT_HUBS = 8;
+const PROJECT_SESSION_SAT = 6;
+const PROJECT_DOC_SAT = 5;
+const ARCHIVE_SAT = 24;
+const PROJECT_R = HUB_R + 0.5;
+const ARCHIVE_COLOR = "var(--muted-foreground)";
 
 /**
- * Existing chat sessions as agent instances: one hub per session (colored by
- * type), each expanding into its enabled specialists + their tools.
+ * The full chat universe: one star per project (sessions + files clustered
+ * around it), the newest unfiled sessions as their own stars, and everything
+ * older folded into a single expandable "archive" star — so the globe stays
+ * readable at any chat count.
  */
-export function buildSessionNetwork(
-    sessions: ChatSession[],
-    presets: Preset[],
-    agents: AgentDef[],
-): Network {
-    const shown = sessions.slice(0, MAX_SESSIONS);
-    const hubUnits = fibonacciSphere(shown.length);
-    const presetById = new Map(presets.map((p) => [p.id, p]));
-    const agentsById = new Map(agents.map((a) => [a.id, a]));
+export function buildUniverseNetwork(opts: {
+    projects: Project[];
+    sessions: ChatSession[];
+    documents: Pick<Document, "id" | "title" | "project_id">[];
+    presets: Preset[];
+    agents: AgentDef[];
+    expanded: boolean;
+}): Network {
+    const presetById = new Map(opts.presets.map((p) => [p.id, p]));
+    const agentsById = new Map(opts.agents.map((a) => [a.id, a]));
     const net: Network = { nodes: [], edges: [] };
 
-    shown.forEach((session, i) => {
-        const hubUnit = hubUnits[i]!;
-        const preset = session.preset_id
-            ? presetById.get(session.preset_id)
-            : undefined;
+    const filed = opts.sessions.filter((s) => s.project_id !== null);
+    const unfiled = opts.sessions.filter((s) => s.project_id === null);
+    const recent = unfiled.slice(0, RECENT_HUBS);
+    const archived = unfiled.slice(RECENT_HUBS);
+
+    const hubCount =
+        opts.projects.length + recent.length + (archived.length > 0 ? 1 : 0);
+    const hubUnits = fibonacciSphere(hubCount);
+    let slot = 0;
+
+    // Project stars: files in close, chats orbiting.
+    for (const project of opts.projects) {
+        const unit = hubUnits[slot++]!;
+        const hubId = `project:${project.id}`;
+        const color = project.color ?? "var(--primary)";
+        const docs = opts.documents
+            .filter((d) => d.project_id === project.id)
+            .slice(0, PROJECT_DOC_SAT);
+        const sessions = filed
+            .filter((s) => s.project_id === project.id)
+            .slice(0, PROJECT_SESSION_SAT);
+        net.nodes.push({
+            id: hubId,
+            kind: "project",
+            label: project.name,
+            color,
+            unit,
+            r: PROJECT_R,
+            primary: true,
+            meta: {
+                title: project.name,
+                subtitle: project.description ?? "project",
+                chips: docs.map((d) => ({ label: d.title })),
+                foot: `${sessions.length} chats · ${docs.length} files`,
+            },
+            payload: { project },
+        });
+        docs.forEach((doc, i) => {
+            const dUnit = satelliteUnit(unit, i, docs.length, TOOL_SPREAD);
+            const id = `${hubId}:doc:${doc.id}`;
+            net.nodes.push({
+                id,
+                kind: "doc",
+                label: doc.title,
+                color,
+                unit: dUnit,
+                r: TOOL_R,
+                parentId: hubId,
+                primary: false,
+                meta: { title: doc.title, subtitle: `file · ${project.name}` },
+            });
+            net.edges.push({ a: hubId, b: id });
+        });
+        sessions.forEach((s, i) => {
+            const sUnit = satelliteUnit(unit, i, sessions.length, AGENT_SPREAD);
+            const preset = s.preset_id ? presetById.get(s.preset_id) : undefined;
+            const id = `session:${s.id}`;
+            net.nodes.push({
+                id,
+                kind: "session",
+                label: s.title,
+                color: sessionColor(s, preset, agentsById),
+                unit: sUnit,
+                r: AGENT_R,
+                parentId: hubId,
+                primary: true,
+                meta: {
+                    title: s.title,
+                    subtitle: preset ? preset.name : "no preset",
+                    foot: `updated ${relativeTime(s.updated_at)}`,
+                },
+                payload: s,
+            });
+            net.edges.push({ a: hubId, b: id });
+        });
+    }
+
+    // Recent unfiled sessions: their own stars with specialist satellites.
+    for (const s of recent) {
+        const unit = hubUnits[slot++]!;
+        const preset = s.preset_id ? presetById.get(s.preset_id) : undefined;
         const defs = safeAgents(preset)
             .map((id) => agentsById.get(id))
             .filter((d): d is AgentDef => d !== undefined);
-        const hubId = `session:${session.id}`;
+        const hubId = `session:${s.id}`;
         net.nodes.push({
             id: hubId,
             kind: "session",
-            label: session.title,
-            color: sessionColor(session, preset, agentsById),
-            unit: hubUnit,
+            label: s.title,
+            color: sessionColor(s, preset, agentsById),
+            unit,
             r: HUB_R,
             primary: true,
             meta: {
-                title: session.title,
+                title: s.title,
                 subtitle: preset
                     ? `${preset.name} · ${preset.provider}/${preset.model}`
                     : "no preset",
@@ -211,14 +294,61 @@ export function buildSessionNetwork(
                     const info = agentInfo(d);
                     return { label: info.slug, color: info.color };
                 }),
-                foot: `updated ${relativeTime(session.updated_at)}`,
+                foot: `updated ${relativeTime(s.updated_at)}`,
             },
-            payload: session,
+            payload: s,
         });
         defs.forEach((def, k) =>
-            attachAgent(net, hubId, hubUnit, def, k, defs.length, hubId),
+            attachAgent(net, hubId, unit, def, k, defs.length, hubId),
         );
-    });
+    }
+
+    // The outskirts: older chats as one dim star; click to unfold them.
+    if (archived.length > 0) {
+        const unit = hubUnits[slot++]!;
+        const hubId = "archive";
+        net.nodes.push({
+            id: hubId,
+            kind: "archive",
+            label: `${archived.length} older`,
+            color: ARCHIVE_COLOR,
+            unit,
+            r: HUB_R,
+            primary: true,
+            meta: {
+                title: `${archived.length} older chats`,
+                subtitle: opts.expanded
+                    ? "Click a chat to open it · click here to fold them back."
+                    : "Click to unfold them onto the globe.",
+            },
+            payload: { archive: true, count: archived.length },
+        });
+        if (opts.expanded) {
+            const shown = archived.slice(0, ARCHIVE_SAT);
+            shown.forEach((s, i) => {
+                const sUnit = satelliteUnit(unit, i, shown.length, AGENT_SPREAD * 1.4);
+                const preset = s.preset_id ? presetById.get(s.preset_id) : undefined;
+                const id = `session:${s.id}`;
+                net.nodes.push({
+                    id,
+                    kind: "session",
+                    label: s.title,
+                    color: sessionColor(s, preset, agentsById),
+                    unit: sUnit,
+                    r: AGENT_R,
+                    parentId: hubId,
+                    primary: true,
+                    meta: {
+                        title: s.title,
+                        subtitle: preset ? preset.name : "no preset",
+                        foot: `updated ${relativeTime(s.updated_at)}`,
+                    },
+                    payload: s,
+                });
+                net.edges.push({ a: hubId, b: id });
+            });
+        }
+    }
 
     return net;
 }
