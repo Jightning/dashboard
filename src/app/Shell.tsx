@@ -57,9 +57,13 @@ export function Shell() {
                                 <AgentsPage
                                     tab={nav.tab}
                                     sessionId={nav.sessionId}
+                                    onNavigate={setNav}
                                 />
                             ) : nav.page === "categories" ? (
-                                <CategoriesPage onNavigate={setNav} />
+                                <CategoriesPage
+                                    onNavigate={setNav}
+                                    initialProjectId={nav.projectId}
+                                />
                             ) : nav.page === "notes" ? (
                                 <NotesPage tab={nav.tab} />
                             ) : nav.page === "planner" ? (

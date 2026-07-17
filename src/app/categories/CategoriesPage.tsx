@@ -13,14 +13,16 @@ import { CategoryDetail } from "./CategoryDetail";
 
 export function CategoriesPage({
     onNavigate,
+    initialProjectId,
 }: {
     onNavigate: (t: NavTarget) => void;
+    initialProjectId?: string;
 }) {
     const [categories, setCategories] = useState<Category[]>([]);
     const [counts, setCounts] = useState<Record<string, categoriesRepo.CategoryCounts>>({});
     const [looseProjects, setLooseProjects] = useState<Project[]>([]);
     const [openId, setOpenId] = useState<string | null>(null);
-    const [openProjectId, setOpenProjectId] = useState<string | null>(null);
+    const [openProject, setOpenProject] = useState<Project | null>(null);
     const [name, setName] = useState("");
     const [error, setError] = useState<string | null>(null);
 
@@ -39,6 +41,15 @@ export function CategoriesPage({
         void reload();
     }, [reload]);
 
+    // Deep link (e.g. "open this project" from a network sphere's star).
+    useEffect(() => {
+        if (!initialProjectId) return;
+        void projectsRepo
+            .getProject(initialProjectId)
+            .then((p) => setOpenProject(p))
+            .catch(() => setOpenProject(null));
+    }, [initialProjectId]);
+
     const create = async () => {
         setError(null);
         try {
@@ -52,15 +63,12 @@ export function CategoriesPage({
         }
     };
 
-    const openProject = openProjectId
-        ? looseProjects.find((p) => p.id === openProjectId)
-        : undefined;
     if (openProject) {
         return (
             <ProjectDetail
                 key={openProject.id}
                 project={openProject}
-                onBack={() => setOpenProjectId(null)}
+                onBack={() => setOpenProject(null)}
                 onChanged={reload}
                 onOpenChat={(sessionId) =>
                     onNavigate({ page: "agents", tab: "chat", sessionId })
@@ -152,7 +160,7 @@ export function CategoriesPage({
                                     key={p.id}
                                     className="cursor-pointer transition-colors hover:border-primary/40"
                                     style={{ borderLeft: `2px solid ${p.color ?? "var(--primary)"}` }}
-                                    onClick={() => setOpenProjectId(p.id)}
+                                    onClick={() => setOpenProject(p)}
                                 >
                                     <CardHeader>
                                         <CardTitle>{p.name}</CardTitle>

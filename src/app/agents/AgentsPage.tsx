@@ -14,6 +14,7 @@ import { PipelinesTab } from "./PipelinesTab";
 import { AutomationsTab } from "./AutomationsTab";
 import { TabBar } from "@/components/ui/tabs";
 import { ChatWorkspace } from "@/app/chat/ChatWorkspace";
+import type { NavTarget } from "@/app/Sidebar";
 
 type Tab = "chat" | "roster" | "pipelines" | "automations";
 const TABS: { id: Tab; label: string }[] = [
@@ -27,9 +28,11 @@ const isTab = (t: string | undefined): t is Tab => TABS.some((x) => x.id === t);
 export function AgentsPage({
     tab,
     sessionId,
+    onNavigate,
 }: {
     tab?: string;
     sessionId?: string | null;
+    onNavigate?: (t: NavTarget) => void;
 } = {}) {
     const [active, setActive] = useState<Tab>(isTab(tab) ? tab : "chat");
     useEffect(() => {
@@ -43,7 +46,10 @@ export function AgentsPage({
             </div>
             {active === "chat" ? (
                 <div className="min-h-0 flex-1">
-                    <ChatWorkspace initialSessionId={sessionId} />
+                    <ChatWorkspace
+                        initialSessionId={sessionId}
+                        onNavigate={onNavigate}
+                    />
                 </div>
             ) : (
                 <div className="min-h-0 flex-1 overflow-y-auto p-6">

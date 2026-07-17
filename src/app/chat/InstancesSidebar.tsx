@@ -49,6 +49,8 @@ export function InstancesSidebar({
     agents,
     activeId,
     highlightId,
+    categoryFilter,
+    onCategoryFilter,
     onOpen,
     onDelete,
     onHover,
@@ -65,6 +67,8 @@ export function InstancesSidebar({
     agents: AgentDef[];
     activeId: string | null;
     highlightId: string | null;
+    categoryFilter: string | null;
+    onCategoryFilter: (id: string | null) => void;
     onOpen: (session: ChatSession) => void;
     onDelete: (session: ChatSession) => void;
     onHover: (sessionId: string | null) => void;
@@ -80,7 +84,6 @@ export function InstancesSidebar({
     const [renamingId, setRenamingId] = useState<string | null>(null);
     const [draftTitle, setDraftTitle] = useState("");
     const [query, setQuery] = useState("");
-    const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
     const [contentHits, setContentHits] = useState<Set<string> | null>(null);
     const rowRefs = useRef<Record<string, HTMLDivElement | null>>({});
     // Enter/Escape commit or cancel the rename synchronously and unmount the
@@ -220,6 +223,11 @@ export function InstancesSidebar({
                     ) : (
                         <button
                             onClick={() => onOpen(s)}
+                            onDoubleClick={() => {
+                                renameHandledRef.current = false;
+                                setRenamingId(s.id);
+                                setDraftTitle(s.title);
+                            }}
                             className="min-w-0 flex-1 text-left"
                         >
                             <div className="truncate text-xs text-foreground">
@@ -497,7 +505,7 @@ export function InstancesSidebar({
                         color: c.color ?? undefined,
                     }))}
                     active={categoryFilter}
-                    onChange={setCategoryFilter}
+                    onChange={onCategoryFilter}
                 />
             </div>
 

@@ -25,6 +25,7 @@ export interface NavTarget {
     page: Page;
     tab?: string;
     sessionId?: string;
+    projectId?: string;
 }
 
 interface NavItem {

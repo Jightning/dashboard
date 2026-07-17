@@ -117,7 +117,7 @@ function NotesTabBody() {
     }, [activeId]);
 
     const newNote = async () => {
-        const note = await notesRepo.createNote({});
+        const note = await notesRepo.createNote({ categoryId: categoryFilter });
         await reloadList();
         setActiveId(note.id);
     };

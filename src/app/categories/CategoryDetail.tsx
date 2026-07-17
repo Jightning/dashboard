@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { ArrowLeft, Check, Trash2 } from "lucide-react";
+import { ArrowLeft, Check, Plus, Trash2 } from "lucide-react";
 import * as categoriesRepo from "@/db/repo/categories";
 import * as projectsRepo from "@/db/repo/projects";
 import * as sessionsRepo from "@/db/repo/sessions";
@@ -247,7 +247,28 @@ export function CategoryDetail({
                 )}
 
                 {tab === "notes" && (
-                    <div className="flex flex-col gap-1.5">
+                    <div className="flex flex-col gap-3">
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            className="self-start"
+                            onClick={() =>
+                                void act(async () => {
+                                    await notesRepo.createNote({
+                                        title: "Untitled",
+                                        categoryId: category.id,
+                                    });
+                                }).then((ok) => {
+                                    if (ok)
+                                        onNavigate({
+                                            page: "notes",
+                                            tab: "notes",
+                                        });
+                                })
+                            }
+                        >
+                            <Plus className="mr-1 h-3.5 w-3.5" /> New note here
+                        </Button>
                         {notes.map((n) => (
                             <button
                                 key={n.id}

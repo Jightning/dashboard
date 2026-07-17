@@ -47,7 +47,9 @@ import {
     buildAgentTypeNetwork,
     buildCategoryUniverse,
     buildUniverseNetwork,
+    UNFILED_ID,
 } from "@/components/hud/networkData";
+import type { NavTarget } from "@/app/Sidebar";
 import { Typewriter } from "@/components/hud/Typewriter";
 import { PermissionLevelSelect } from "@/components/PermissionLevelSelect";
 import { InstancesSidebar } from "./InstancesSidebar";
@@ -62,8 +64,10 @@ interface ActiveChat {
 
 export function ChatWorkspace({
     initialSessionId,
+    onNavigate,
 }: {
     initialSessionId?: string | null;
+    onNavigate?: (t: NavTarget) => void;
 } = {}) {
     const { settings } = useRuntime();
     const [sessions, setSessions] = useState<ChatSession[]>([]);
@@ -77,6 +81,7 @@ export function ChatWorkspace({
     >([]);
     const [archiveOpen, setArchiveOpen] = useState(false);
     const [sphereFocus, setSphereFocus] = useState<string | null>(null);
+    const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
     const [active, setActive] = useState<ActiveChat | null>(null);
     const [error, setError] = useState<string | null>(null);
     // Session id highlighted by hovering a sphere node or a sidebar row.
@@ -144,17 +149,27 @@ export function ChatWorkspace({
             );
     }, [initialSessionId, openSession]);
 
+    // Where a new chat files itself: the sphere's focused category wins,
+    // else the sidebar's active filter. "unfiled" means explicitly nowhere.
+    const creationCategoryId =
+        sphereFocus && sphereFocus !== UNFILED_ID
+            ? sphereFocus
+            : sphereFocus === UNFILED_ID
+              ? null
+              : categoryFilter;
+
     const newChat = useCallback(
         async (preset: Preset) => {
             const session = await sessionsRepo.createSession({
                 title: `${preset.name} chat`,
                 presetId: preset.id,
                 permissionLevelId: preset.permission_level_id,
+                categoryId: creationCategoryId,
             });
             setSessions(await sessionsRepo.listSessions());
             await openSession(session);
         },
-        [openSession],
+        [openSession, creationCategoryId],
     );
 
     // No chat selected → the universe. With categories, one star per category
@@ -205,7 +220,9 @@ export function ChatWorkspace({
                 return;
             }
             if (node.kind === "project") {
-                return; // project stars are context; management lives in Projects
+                const project = (node.payload as { project: Project }).project;
+                onNavigate?.({ page: "categories", projectId: project.id });
+                return;
             }
             if (node.kind === "session") {
                 void openSession(node.payload as ChatSession);
@@ -226,7 +243,7 @@ export function ChatWorkspace({
                 }) ?? presets[0];
             if (preset) void newChat(preset);
         },
-        [openSession, newChat, presets],
+        [openSession, newChat, presets, onNavigate],
     );
 
     const deleteInstance = useCallback(async (session: ChatSession) => {
@@ -273,6 +290,8 @@ export function ChatWorkspace({
                 agents={agents}
                 activeId={active?.session.id ?? null}
                 highlightId={hoveredInstanceId}
+                categoryFilter={categoryFilter}
+                onCategoryFilter={setCategoryFilter}
                 onOpen={(s) => void openSession(s)}
                 onDelete={(s) => void deleteInstance(s)}
                 onHover={setHoveredInstanceId}
