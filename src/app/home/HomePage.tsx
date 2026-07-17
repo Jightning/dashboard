@@ -4,15 +4,23 @@ import { listSessions } from "@/db/repo/sessions";
 import { listDocuments } from "@/db/repo/documents";
 import { listNotes } from "@/db/repo/notes";
 import { listPresets } from "@/db/repo/presets";
-import { listOpenTasks } from "@/db/repo/tasks";
+import { listOpenTasks, createTask } from "@/db/repo/tasks";
 import { listEventsBetween } from "@/db/repo/events";
 import { listFollowUpsDue } from "@/db/repo/applications";
 import { countDueFlashcards } from "@/db/repo/flashcards";
+import { listBookmarks } from "@/db/repo/library";
+import { createNote } from "@/db/repo/notes";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { NeuralCore } from "@/components/hud/NeuralCore";
 import { Typewriter } from "@/components/hud/Typewriter";
-import type { Application, CalendarEvent, Task } from "@/lib/schemas";
+import { relativeTime } from "@/components/hud/networkData";
+import { openExternal } from "@/lib/openExternal";
+import { cn } from "@/lib/utils";
+import type { NavTarget } from "@/app/Sidebar";
+import type { Application, Bookmark, CalendarEvent, ChatSession, Task } from "@/lib/schemas";
 
 interface HomeStats {
     sessions: number;
@@ -37,8 +45,12 @@ function greeting(): string {
     return "Good evening.";
 }
 
-export function HomePage() {
+export function HomePage({
+    onNavigate,
+}: { onNavigate?: (t: NavTarget) => void } = {}) {
     const [stats, setStats] = useState<HomeStats | null>(null);
+    const [recent, setRecent] = useState<ChatSession[]>([]);
+    const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
     const [today, setToday] = useState<{
         events: CalendarEvent[];
         dueTasks: Task[];
@@ -48,11 +60,12 @@ export function HomePage() {
 
     useEffect(() => {
         void (async () => {
-            const [sessions, notes, documents, presets] = await Promise.all([
+            const [sessions, notes, documents, presets, bmks] = await Promise.all([
                 listSessions(),
                 listNotes(),
                 listDocuments(),
                 listPresets(),
+                listBookmarks(),
             ]);
             setStats({
                 sessions: sessions.length,
@@ -60,6 +73,8 @@ export function HomePage() {
                 documents: documents.length,
                 presets: presets.length,
             });
+            setRecent(sessions.slice(0, 3));
+            setBookmarks(bmks.slice(0, 8));
             setToday({
                 events: await listEventsBetween(
                     Date.now() - 12 * 3_600_000,
@@ -94,6 +109,8 @@ export function HomePage() {
                     </div>
                 </header>
 
+                <QuickCapture onNavigate={onNavigate} />
+
                 <div className="flex items-center gap-6">
                     <NeuralCore size={220} state="idle" className="shrink-0" />
                     <div className="grid flex-1 grid-cols-2 gap-3">
@@ -101,11 +118,17 @@ export function HomePage() {
                             index={0}
                             label="chat sessions"
                             value={stats?.sessions}
+                            onClick={() =>
+                                onNavigate?.({ page: "agents", tab: "chat" })
+                            }
                         />
                         <StatTile
                             index={1}
                             label="notes"
                             value={stats?.notes}
+                            onClick={() =>
+                                onNavigate?.({ page: "notes", tab: "notes" })
+                            }
                         />
                         <StatTile
                             index={2}
@@ -116,9 +139,78 @@ export function HomePage() {
                             index={3}
                             label="context presets"
                             value={stats?.presets}
+                            onClick={() => onNavigate?.({ page: "presets" })}
                         />
                     </div>
                 </div>
+
+                {recent.length > 0 && (
+                    <section>
+                        <h2 className="mb-2 font-mono text-xs uppercase tracking-[0.18em] text-muted-foreground">
+                            Recent chats
+                        </h2>
+                        <div className="flex flex-col gap-1">
+                            {recent.map((s) => (
+                                <button
+                                    key={s.id}
+                                    onClick={() =>
+                                        onNavigate?.({
+                                            page: "agents",
+                                            tab: "chat",
+                                            sessionId: s.id,
+                                        })
+                                    }
+                                    className="flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors duration-(--dur-fast) hover:bg-accent"
+                                >
+                                    <span
+                                        aria-hidden
+                                        className="h-1.5 w-1.5 shrink-0 rounded-full"
+                                        style={{
+                                            backgroundColor:
+                                                s.color ?? "var(--primary)",
+                                        }}
+                                    />
+                                    <span className="flex-1 truncate text-sm">
+                                        {s.title}
+                                    </span>
+                                    <span className="font-mono text-[10px] text-muted-foreground">
+                                        {relativeTime(s.updated_at)}
+                                    </span>
+                                </button>
+                            ))}
+                        </div>
+                    </section>
+                )}
+
+                {bookmarks.length > 0 && (
+                    <section>
+                        <h2 className="mb-2 font-mono text-xs uppercase tracking-[0.18em] text-muted-foreground">
+                            Bookmarks
+                        </h2>
+                        <div className="flex flex-wrap gap-1.5">
+                            {bookmarks.map((b) => (
+                                <button
+                                    key={b.id}
+                                    onClick={() => void openExternal(b.url)}
+                                    className="cursor-pointer rounded-full border border-border px-2.5 py-0.5 font-mono text-[10px] tracking-wider text-muted-foreground transition-colors hover:border-primary/50 hover:text-primary"
+                                >
+                                    {b.title}
+                                </button>
+                            ))}
+                            <button
+                                onClick={() =>
+                                    onNavigate?.({
+                                        page: "notes",
+                                        tab: "bookmarks",
+                                    })
+                                }
+                                className="cursor-pointer rounded-full px-2 py-0.5 font-mono text-[10px] uppercase text-muted-foreground hover:text-foreground"
+                            >
+                                all →
+                            </button>
+                        </div>
+                    </section>
+                )}
 
                 <section>
                     <h2 className="mb-3 font-mono text-xs uppercase tracking-[0.18em] text-muted-foreground">
@@ -126,9 +218,17 @@ export function HomePage() {
                     </h2>
                     <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
                         <Card corners className="flex flex-col gap-2 p-4">
-                            <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                            <button
+                                onClick={() =>
+                                    onNavigate?.({
+                                        page: "planner",
+                                        tab: "calendar",
+                                    })
+                                }
+                                className="cursor-pointer self-start font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground hover:text-primary"
+                            >
                                 schedule
-                            </span>
+                            </button>
                             {today?.events.length ? (
                                 today.events.map((e) => (
                                     <div
@@ -160,9 +260,17 @@ export function HomePage() {
                             )}
                         </Card>
                         <Card corners className="flex flex-col gap-2 p-4">
-                            <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                            <button
+                                onClick={() =>
+                                    onNavigate?.({
+                                        page: "planner",
+                                        tab: "tasks",
+                                    })
+                                }
+                                className="cursor-pointer self-start font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground hover:text-primary"
+                            >
                                 due next 48h
-                            </span>
+                            </button>
                             {today?.dueTasks.length ? (
                                 today.dueTasks.map((t) => (
                                     <div
@@ -203,9 +311,17 @@ export function HomePage() {
                             )}
                         </Card>
                         <Card corners className="flex flex-col gap-2 p-4">
-                            <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                            <button
+                                onClick={() =>
+                                    onNavigate?.({
+                                        page: "planner",
+                                        tab: "applications",
+                                    })
+                                }
+                                className="cursor-pointer self-start font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground hover:text-primary"
+                            >
                                 follow-ups due
-                            </span>
+                            </button>
                             {today?.followUps.length ? (
                                 today.followUps.map((a) => (
                                     <div
@@ -242,10 +358,12 @@ function StatTile({
     label,
     value,
     index,
+    onClick,
 }: {
     label: string;
     value: number | undefined;
     index: number;
+    onClick?: () => void;
 }) {
     return (
         <motion.div
@@ -257,7 +375,15 @@ function StatTile({
                 ease: [0.16, 1, 0.3, 1],
             }}
         >
-            <Card corners className="flex flex-col gap-1 p-4">
+            <Card
+                corners
+                onClick={onClick}
+                className={cn(
+                    "flex flex-col gap-1 p-4",
+                    onClick &&
+                        "cursor-pointer transition-colors duration-(--dur-fast) hover:border-primary/50 hover:bg-accent/40",
+                )}
+            >
                 <span className="font-mono text-3xl text-primary text-glow">
                     {value ?? "–"}
                 </span>
@@ -266,5 +392,76 @@ function StatTile({
                 </span>
             </Card>
         </motion.div>
+    );
+}
+
+function QuickCapture({
+    onNavigate,
+}: {
+    onNavigate?: (t: NavTarget) => void;
+}) {
+    const [text, setText] = useState("");
+    const [saving, setSaving] = useState(false);
+    const [saved, setSaved] = useState<string | null>(null);
+
+    const capture = async (kind: "task" | "note") => {
+        const title = text.trim();
+        if (!title || saving) return;
+        setSaving(true);
+        try {
+            if (kind === "task") {
+                await createTask({ title });
+                setSaved("Task added — see Planner.");
+            } else {
+                await createNote({ title });
+                setSaved("Note created — see Notes.");
+            }
+            setText("");
+        } catch (e) {
+            setSaved(e instanceof Error ? e.message : String(e));
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    return (
+        <div className="flex items-center gap-2">
+            <Input
+                value={text}
+                placeholder="Capture a task or note…"
+                onChange={(e) => {
+                    setText(e.target.value);
+                    setSaved(null);
+                }}
+                onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.repeat) void capture("task");
+                }}
+            />
+            <Button size="sm" disabled={saving} onClick={() => void capture("task")}>
+                Task
+            </Button>
+            <Button
+                size="sm"
+                variant="outline"
+                disabled={saving}
+                onClick={() => void capture("note")}
+            >
+                Note
+            </Button>
+            {saved && (
+                <button
+                    className="cursor-pointer whitespace-nowrap font-mono text-[10px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
+                    onClick={() =>
+                        onNavigate?.(
+                            saved.startsWith("Task")
+                                ? { page: "planner", tab: "tasks" }
+                                : { page: "notes", tab: "notes" },
+                        )
+                    }
+                >
+                    {saved}
+                </button>
+            )}
+        </div>
     );
 }

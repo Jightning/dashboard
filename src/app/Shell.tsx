@@ -53,7 +53,9 @@ export function Shell() {
                                 ease: [0.16, 1, 0.3, 1],
                             }}
                         >
-                            {nav.page === "agents" ? (
+                            {nav.page === "home" ? (
+                                <HomePage onNavigate={setNav} />
+                            ) : nav.page === "agents" ? (
                                 <AgentsPage
                                     tab={nav.tab}
                                     sessionId={nav.sessionId}
