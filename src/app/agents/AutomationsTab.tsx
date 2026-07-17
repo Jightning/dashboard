@@ -23,6 +23,7 @@ import type {
 } from "@/lib/schemas";
 import { RunHistory } from "./RunHistory";
 import { TemplateChips } from "./PipelinesTab";
+import { TemplateEditor } from "./TemplateEditor";
 
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
@@ -350,12 +351,12 @@ function AutomationEditor({
                 </div>
                 <label className="flex flex-col gap-1 text-sm">
                     What each run starts with
-                    <Input
+                    <TemplateEditor
+                        rows={1}
                         value={form.inputTemplate}
                         placeholder="e.g. Summarize https://news.ycombinator.com for {{date}}"
-                        onChange={(e) =>
-                            setForm({ ...form, inputTemplate: e.target.value })
-                        }
+                        onChange={(v) => setForm({ ...form, inputTemplate: v })}
+                        knownTokens={["date"]}
                     />
                 </label>
                 <TemplateChips

@@ -12,7 +12,7 @@ import { useRuntime } from "@/app/runtime";
 import { ApprovalCards } from "@/components/chat/ApprovalCard";
 import { PermissionLevelSelect } from "@/components/PermissionLevelSelect";
 import { Button } from "@/components/ui/button";
-import { Input, Textarea } from "@/components/ui/input";
+import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type {
@@ -23,6 +23,7 @@ import type {
     PipelineStep,
 } from "@/lib/schemas";
 import { RunHistory } from "./RunHistory";
+import { TemplateEditor } from "./TemplateEditor";
 
 interface StepDraft {
     agentId: string;
@@ -358,16 +359,20 @@ function PipelineEditor({
                                 <Trash2 className="h-4 w-4" />
                             </Button>
                         </div>
-                        <Textarea
-                            ref={(el) => {
+                        <TemplateEditor
+                            taRef={(el) => {
                                 taRefs.current[i] = el;
                             }}
                             rows={2}
                             placeholder="What should this agent do? e.g. Summarize the key points of {{prev}}"
                             value={s.promptTemplate}
-                            onChange={(e) =>
-                                setStep(i, { promptTemplate: e.target.value })
-                            }
+                            onChange={(v) => setStep(i, { promptTemplate: v })}
+                            knownTokens={[
+                                "input",
+                                "date",
+                                ...(i > 0 ? ["prev"] : []),
+                                ...steps.slice(0, i).map((_, j) => `step${j + 1}`),
+                            ]}
                         />
                         <TemplateChips
                             tokens={[
