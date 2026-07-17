@@ -60,8 +60,10 @@ export function CategoryDetail({
             await fn();
             await reload();
             await onChanged();
+            return true;
         } catch (e) {
             setError(e instanceof Error ? e.message : String(e));
+            return false;
         }
     };
 
@@ -102,7 +104,9 @@ export function CategoryDetail({
                                 onClick={() =>
                                     void act(() =>
                                         categoriesRepo.deleteCategory(category.id),
-                                    ).then(onBack)
+                                    ).then((ok) => {
+                                        if (ok) onBack();
+                                    })
                                 }
                             >
                                 Confirm — untag everything
