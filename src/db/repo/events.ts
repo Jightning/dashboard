@@ -41,6 +41,10 @@ export async function listEventsBetween(
     return rows.map((r) => eventSchema.parse(r));
 }
 
+export async function deleteEvent(id: string): Promise<void> {
+    await getDb().execute("DELETE FROM events WHERE id = ?", [id]);
+}
+
 /** Clear a course's imported events before re-importing a semester's ICS. */
 export async function deleteEventsBySource(
     courseId: string,

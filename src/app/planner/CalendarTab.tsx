@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight, Upload, Trash2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, Upload, Trash2, Plus, X } from "lucide-react";
 import * as coursesRepo from "@/db/repo/courses";
 import * as categoriesRepo from "@/db/repo/categories";
+import { deleteEvent, insertEvent } from "@/db/repo/events";
 import { importClassSchedule } from "@/lib/ics";
 import { collectCalendarItems, type CalendarItem } from "./calendarItems";
 import { Button } from "@/components/ui/button";
@@ -12,7 +13,7 @@ import { cn } from "@/lib/utils";
 import type { Category, Course } from "@/lib/schemas";
 
 const DAY = 86_400_000;
-type ViewMode = "7d" | "14d" | "month";
+type ViewMode = "1d" | "7d" | "14d" | "month";
 
 function startOfDay(t: number): number {
     const d = new Date(t);
@@ -29,7 +30,10 @@ function rangeFor(mode: ViewMode, anchor: number): { from: number; to: number } 
         return { from: gridStart, to: gridStart + 42 * DAY };
     }
     const from = startOfDay(anchor);
-    return { from, to: from + (mode === "7d" ? 7 : 14) * DAY };
+    return {
+        from,
+        to: from + (mode === "1d" ? 1 : mode === "7d" ? 7 : 14) * DAY,
+    };
 }
 
 export function CalendarTab() {
@@ -68,7 +72,10 @@ export function CalendarTab() {
 
     const shift = (dir: 1 | -1) =>
         setAnchor((a) => {
-            if (mode !== "month") return a + dir * ((mode === "7d" ? 7 : 14) * DAY);
+            if (mode !== "month") {
+                const step = (mode === "1d" ? 1 : mode === "7d" ? 7 : 14) * DAY;
+                return a + dir * step;
+            }
             const d = new Date(a);
             d.setDate(1);
             d.setMonth(d.getMonth() + dir);
@@ -80,7 +87,7 @@ export function CalendarTab() {
             {error && <p className="text-xs text-destructive">{error}</p>}
             <div className="flex flex-wrap items-center gap-2">
                 <div className="flex rounded-md border border-border">
-                    {(["7d", "14d", "month"] as const).map((m) => (
+                    {(["1d", "7d", "14d", "month"] as const).map((m) => (
                         <button
                             key={m}
                             onClick={() => setMode(m)}
@@ -91,7 +98,11 @@ export function CalendarTab() {
                                     : "text-muted-foreground hover:text-foreground",
                             )}
                         >
-                            {m === "month" ? "1 month" : `${m.slice(0, -1)} days`}
+                            {m === "month"
+                                ? "1 month"
+                                : m === "1d"
+                                  ? "1 day"
+                                  : `${m.slice(0, -1)} days`}
                         </button>
                     ))}
                 </div>
@@ -138,17 +149,116 @@ export function CalendarTab() {
                 active={categoryFilter}
                 onChange={setCategoryFilter}
             />
+            <QuickEvent
+                onAdd={(input) =>
+                    act(() => insertEvent({ ...input, source: "manual" }))
+                }
+            />
             {mode === "month" ? (
                 <MonthGrid from={from} items={visible} anchor={anchor} />
             ) : (
-                <DayList from={from} days={mode === "7d" ? 7 : 14} items={visible} />
+                <DayList
+                    from={from}
+                    days={mode === "1d" ? 1 : mode === "7d" ? 7 : 14}
+                    items={visible}
+                    onDeleteManual={(item) =>
+                        void act(() => deleteEvent(item.refId))
+                    }
+                />
             )}
             <CoursesPanel courses={courses} act={act} reload={reload} />
         </div>
     );
 }
 
-function ItemChip({ item, showTime }: { item: CalendarItem; showTime: boolean }) {
+function QuickEvent({
+    onAdd,
+}: {
+    onAdd: (input: {
+        title: string;
+        startsAt: number;
+        endsAt: number;
+        location: string | null;
+    }) => Promise<void>;
+}) {
+    const [title, setTitle] = useState("");
+    const [start, setStart] = useState("");
+    const [minutes, setMinutes] = useState("60");
+    const [location, setLocation] = useState("");
+    const [saving, setSaving] = useState(false);
+
+    const submit = async () => {
+        if (!title.trim() || !start || saving) return;
+        setSaving(true);
+        try {
+            const startsAt = new Date(start).getTime();
+            await onAdd({
+                title: title.trim(),
+                startsAt,
+                endsAt: startsAt + Math.max(5, Number(minutes) || 60) * 60_000,
+                location: location.trim() || null,
+            });
+            setTitle("");
+            setStart("");
+            setLocation("");
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    return (
+        <div className="flex items-end gap-2">
+            <label className="flex flex-1 flex-col gap-1 text-sm">
+                New event
+                <Input
+                    value={title}
+                    placeholder="e.g. Dentist"
+                    onChange={(e) => setTitle(e.target.value)}
+                    onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.repeat && !saving) void submit();
+                    }}
+                />
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+                Starts
+                <Input
+                    type="datetime-local"
+                    value={start}
+                    onChange={(e) => setStart(e.target.value)}
+                />
+            </label>
+            <label className="flex w-24 flex-col gap-1 text-sm">
+                Minutes
+                <Input
+                    type="number"
+                    min={5}
+                    value={minutes}
+                    onChange={(e) => setMinutes(e.target.value)}
+                />
+            </label>
+            <label className="flex w-36 flex-col gap-1 text-sm">
+                Where (optional)
+                <Input
+                    value={location}
+                    onChange={(e) => setLocation(e.target.value)}
+                />
+            </label>
+            <Button onClick={() => void submit()} disabled={saving} aria-label="Add event">
+                <Plus className="h-4 w-4" />
+            </Button>
+        </div>
+    );
+}
+
+function ItemChip({
+    item,
+    showTime,
+    onDelete,
+}: {
+    item: CalendarItem;
+    showTime: boolean;
+    onDelete?: () => void;
+}) {
     return (
         <div
             className="flex min-w-0 items-center gap-1.5 rounded-sm px-1.5 py-0.5 text-xs"
@@ -172,6 +282,15 @@ function ItemChip({ item, showTime }: { item: CalendarItem; showTime: boolean })
                 </span>
             )}
             <span className="truncate">{item.title}</span>
+            {onDelete && (
+                <button
+                    aria-label={`Delete ${item.title}`}
+                    className="ml-auto shrink-0 cursor-pointer text-muted-foreground hover:text-destructive"
+                    onClick={() => onDelete()}
+                >
+                    <X className="h-3 w-3" />
+                </button>
+            )}
         </div>
     );
 }
@@ -180,10 +299,12 @@ function DayList({
     from,
     days,
     items,
+    onDeleteManual,
 }: {
     from: number;
     days: number;
     items: CalendarItem[];
+    onDeleteManual?: (item: CalendarItem) => void;
 }) {
     const today = startOfDay(Date.now());
     return (
@@ -213,7 +334,16 @@ function DayList({
                                 <span className="text-xs text-muted-foreground/50">—</span>
                             ) : (
                                 dayItems.map((x) => (
-                                    <ItemChip key={x.id} item={x} showTime />
+                                    <ItemChip
+                                        key={x.id}
+                                        item={x}
+                                        showTime
+                                        onDelete={
+                                            x.manual
+                                                ? () => onDeleteManual?.(x)
+                                                : undefined
+                                        }
+                                    />
                                 ))
                             )}
                         </div>

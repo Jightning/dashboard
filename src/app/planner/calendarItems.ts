@@ -14,6 +14,10 @@ export interface CalendarItem {
     color: string;
     categoryId: string | null;
     detail: string | null;
+    /** Underlying row id (task/event/automation/application). */
+    refId: string;
+    /** True for user-created events — the only calendar items deletable in place. */
+    manual: boolean;
 }
 
 const KIND_FALLBACK: Record<CalendarItem["kind"], string> = {
@@ -60,6 +64,8 @@ export async function collectCalendarItems(
             color: courseById.get(e.course_id ?? "")?.color ?? color(categoryId, "event"),
             categoryId,
             detail: e.location,
+            refId: e.id,
+            manual: e.source === "manual",
         });
     }
     for (const t of tasks) {
@@ -73,6 +79,8 @@ export async function collectCalendarItems(
             color: color(t.category_id, "task"),
             categoryId: t.category_id,
             detail: t.recurrence ? `repeats ${t.recurrence}` : null,
+            refId: t.id,
+            manual: false,
         });
     }
     for (const a of automations) {
@@ -87,6 +95,8 @@ export async function collectCalendarItems(
             color: color(null, "automation"),
             categoryId: null,
             detail: "scheduled run",
+            refId: a.id,
+            manual: false,
         });
     }
     for (const app of applications) {
@@ -101,6 +111,8 @@ export async function collectCalendarItems(
             color: color(null, "application"),
             categoryId: null,
             detail: app.role,
+            refId: app.id,
+            manual: false,
         });
     }
     return items.sort((a, b) => a.at - b.at);

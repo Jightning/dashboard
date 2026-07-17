@@ -42,4 +42,20 @@ describe("collectCalendarItems", () => {
         const items = await collectCalendarItems(t0, t0 + 7 * DAY);
         expect(items).toEqual([]);
     });
+
+    it("marks manual events deletable and carries the row id", async () => {
+        const t0 = Date.now();
+        const e = await insertEvent({
+            title: "Dentist",
+            startsAt: t0 + 3_600_000,
+            endsAt: t0 + 5_400_000,
+            source: "manual",
+        });
+        const items = await collectCalendarItems(t0, t0 + 7 * DAY);
+        expect(items[0]).toMatchObject({
+            kind: "event",
+            refId: e.id,
+            manual: true,
+        });
+    });
 });
