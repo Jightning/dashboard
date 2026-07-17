@@ -32,6 +32,41 @@ function project(id: string, name: string): Project {
     };
 }
 
+function agentDef(id: string, name: string, toolsJson = "[]"): AgentDef {
+    return {
+        id,
+        name,
+        description: "",
+        instructions: "",
+        tools_json: toolsJson,
+        model: null,
+        max_steps: 5,
+        color: null,
+        is_builtin: 0,
+        created_at: 0,
+        updated_at: 0,
+    };
+}
+
+function presetWith(id: string, agentIds: string[]): Preset {
+    return {
+        id,
+        name: id,
+        description: null,
+        system_prompt: "",
+        provider: "anthropic",
+        model: "claude",
+        router_model: null,
+        enabled_agents_json: JSON.stringify(agentIds),
+        permission_level_id: null,
+        token_budget: null,
+        compaction_threshold: null,
+        is_builtin: 0,
+        created_at: 0,
+        updated_at: 0,
+    };
+}
+
 const base = {
     presets: [] as Preset[],
     agents: [] as AgentDef[],
@@ -141,6 +176,28 @@ describe("buildCategoryUniverse", () => {
         expect(chats.filter((n) => (n.shell ?? 1) > 1)).toHaveLength(12 - 8);
         // Newest stay inner.
         expect(chats.find((n) => n.id === "session:ses_0")!.shell ?? 1).toBe(1);
+    });
+
+    it("focused chat stars carry subtle agent satellites, no tools", () => {
+        const agent = agentDef("agt_r", "Research", '["search_web","fetch_url"]');
+        const preset = presetWith("pre_1", ["agt_r"]);
+        const net = buildCategoryUniverse({
+            categories: [cat("cat_a", "School")],
+            projects: [],
+            sessions: [session("ses_1", { category_id: "cat_a", preset_id: "pre_1" })],
+            documents: [],
+            presets: [preset],
+            agents: [agent],
+            focusCategoryId: "cat_a",
+        });
+        const agents = net.nodes.filter((n) => n.kind === "agent");
+        expect(agents).toHaveLength(1);
+        expect(agents[0]!.primary).toBe(false);
+        expect(agents[0]!.r).toBeLessThan(1.5); // subtler than the old AGENT_R
+        expect(net.nodes.filter((n) => n.kind === "tool")).toHaveLength(0);
+        // Hover card lists the agents as chips.
+        const star = net.nodes.find((n) => n.id === "session:ses_1")!;
+        expect(star.meta.chips?.map((c) => c.label)).toEqual(["research"]);
     });
 
     it("focused unfiled shows only unfiled sessions", () => {

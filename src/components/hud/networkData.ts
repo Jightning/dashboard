@@ -120,7 +120,10 @@ function attachAgent(
     slot: number,
     slots: number,
     idPrefix: string,
+    opts: { r?: number; withTools?: boolean } = {},
 ) {
+    const r = opts.r ?? AGENT_R;
+    const withTools = opts.withTools ?? true;
     const unit = satelliteUnit(hubUnit, slot, slots, AGENT_SPREAD);
     const { slug, color, tools } = agentInfo(def);
     const agentId = `${idPrefix}:agent:${slug}`;
@@ -130,7 +133,7 @@ function attachAgent(
         label: slug,
         color,
         unit,
-        r: AGENT_R,
+        r,
         parentId: hubId,
         // Context around the instance — hover reveals it; the hub is the click target.
         primary: false,
@@ -142,22 +145,24 @@ function attachAgent(
     });
     net.edges.push({ a: hubId, b: agentId });
 
-    tools.forEach((toolName, ti) => {
-        const tUnit = satelliteUnit(unit, ti, tools.length, TOOL_SPREAD);
-        const toolId = `${agentId}:tool:${toolName}`;
-        net.nodes.push({
-            id: toolId,
-            kind: "tool",
-            label: toolName,
-            color,
-            unit: tUnit,
-            r: TOOL_R,
-            parentId: hubId,
-            primary: false,
-            meta: { title: toolName, subtitle: `tool · ${slug}` },
+    if (withTools) {
+        tools.forEach((toolName, ti) => {
+            const tUnit = satelliteUnit(unit, ti, tools.length, TOOL_SPREAD);
+            const toolId = `${agentId}:tool:${toolName}`;
+            net.nodes.push({
+                id: toolId,
+                kind: "tool",
+                label: toolName,
+                color,
+                unit: tUnit,
+                r: TOOL_R,
+                parentId: hubId,
+                primary: false,
+                meta: { title: toolName, subtitle: `tool · ${slug}` },
+            });
+            net.edges.push({ a: agentId, b: toolId });
         });
-        net.edges.push({ a: agentId, b: toolId });
-    });
+    }
 }
 
 const RELATIVE = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
@@ -498,8 +503,12 @@ export function buildCategoryUniverse(opts: {
     for (const s of inner) {
         const unit = hubUnits[slot++]!;
         const preset = s.preset_id ? presetById.get(s.preset_id) : undefined;
+        const hubId = `session:${s.id}`;
+        const defs = safeAgents(preset)
+            .map((id) => agentsById.get(id))
+            .filter((d): d is AgentDef => d !== undefined);
         net.nodes.push({
-            id: `session:${s.id}`,
+            id: hubId,
             kind: "session",
             label: s.title,
             color: sessionColor(s, preset, agentsById),
@@ -509,10 +518,20 @@ export function buildCategoryUniverse(opts: {
             meta: {
                 title: s.title,
                 subtitle: preset ? preset.name : "no preset",
+                chips: defs.map((d) => {
+                    const info = agentInfo(d);
+                    return { label: info.slug, color: info.color };
+                }),
                 foot: `updated ${relativeTime(s.updated_at)}`,
             },
             payload: s,
         });
+        defs.forEach((def, k) =>
+            attachAgent(net, hubId, unit, def, k, defs.length, hubId, {
+                r: 1.0,
+                withTools: false,
+            }),
+        );
     }
 
     // Overflow: older chats orbit outside the chart circle — scroll out.
