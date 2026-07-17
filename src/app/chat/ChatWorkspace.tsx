@@ -65,9 +65,11 @@ interface ActiveChat {
 export function ChatWorkspace({
     initialSessionId,
     onNavigate,
+    onSessionOpened,
 }: {
     initialSessionId?: string | null;
     onNavigate?: (t: NavTarget) => void;
+    onSessionOpened?: (id: string | null) => void;
 } = {}) {
     const { settings } = useRuntime();
     const [sessions, setSessions] = useState<ChatSession[]>([]);
@@ -131,11 +133,12 @@ export function ChatWorkspace({
                     },
                     initialMessages: rows.map(rowToUiMessage),
                 });
+                onSessionOpened?.(session.id);
             } catch (e) {
                 setError(e instanceof Error ? e.message : String(e));
             }
         },
-        [settings],
+        [settings, onSessionOpened],
     );
 
     // Deep link (e.g. "open this project chat" from the Projects page).
@@ -246,16 +249,22 @@ export function ChatWorkspace({
         [openSession, newChat, presets, onNavigate],
     );
 
-    const deleteInstance = useCallback(async (session: ChatSession) => {
-        setError(null);
-        try {
-            await sessionsRepo.deleteSession(session.id);
-            setSessions(await sessionsRepo.listSessions());
-            setActive((cur) => (cur?.session.id === session.id ? null : cur));
-        } catch (e) {
-            setError(e instanceof Error ? e.message : String(e));
-        }
-    }, []);
+    const deleteInstance = useCallback(
+        async (session: ChatSession) => {
+            setError(null);
+            try {
+                await sessionsRepo.deleteSession(session.id);
+                setSessions(await sessionsRepo.listSessions());
+                if (active?.session.id === session.id) {
+                    setActive(null);
+                    onSessionOpened?.(null);
+                }
+            } catch (e) {
+                setError(e instanceof Error ? e.message : String(e));
+            }
+        },
+        [active, onSessionOpened],
+    );
 
     const renameInstance = useCallback(
         async (session: ChatSession, title: string) => {
@@ -513,6 +522,7 @@ function ActiveChatView({
             </div>
             <Composer
                 busy={busy}
+                draftKey={active.session.id}
                 visionEnabled={vision}
                 ingestPdf={async (file) => {
                     const doc = await ingestPdf({

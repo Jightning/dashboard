@@ -14,7 +14,13 @@ const TABS: { id: PlannerTab; label: string }[] = [
 const isTab = (t: string | undefined): t is PlannerTab =>
     TABS.some((x) => x.id === t);
 
-export function PlannerPage({ tab }: { tab?: string } = {}) {
+export function PlannerPage({
+    tab,
+    onTabChange,
+}: {
+    tab?: string;
+    onTabChange?: (tab: string) => void;
+} = {}) {
     const [active, setActive] = useState<PlannerTab>(isTab(tab) ? tab : "calendar");
     useEffect(() => {
         if (isTab(tab)) setActive(tab);
@@ -32,7 +38,14 @@ export function PlannerPage({ tab }: { tab?: string } = {}) {
                         ephemeris for everything time-shaped.
                     </p>
                 </header>
-                <TabBar tabs={TABS} active={active} onSelect={setActive} />
+                <TabBar
+                    tabs={TABS}
+                    active={active}
+                    onSelect={(t) => {
+                        setActive(t);
+                        onTabChange?.(t);
+                    }}
+                />
             </div>
             <div
                 className={cn(

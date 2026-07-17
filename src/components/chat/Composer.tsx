@@ -21,6 +21,7 @@ export function Composer({
     visionEnabled,
     ingestPdf,
     transcriber,
+    draftKey,
 }: {
     disabled?: boolean;
     busy: boolean;
@@ -32,8 +33,17 @@ export function Composer({
     ingestPdf?: (file: File) => Promise<{ title: string; folder: string }>;
     /** Audio → text; enables the mic button. */
     transcriber?: (audio: Blob) => Promise<string>;
+    /** Key to persist an in-progress draft under (e.g. the session id). */
+    draftKey?: string;
 }) {
-    const [text, setText] = useState("");
+    const [text, setText] = useState(() => {
+        if (!draftKey) return "";
+        try {
+            return localStorage.getItem(`hugh.draft.${draftKey}`) ?? "";
+        } catch {
+            return "";
+        }
+    });
     const [images, setImages] = useState<FileUIPart[]>([]);
     const [notice, setNotice] = useState<string | null>(null);
     const [recording, setRecording] = useState(false);
@@ -51,6 +61,21 @@ export function Composer({
         ta.style.height = "auto";
         ta.style.height = `${Math.min(ta.scrollHeight, 160)}px`;
     }, [text]);
+
+    // Persist the draft, debounced; clear the key when the draft empties.
+    useEffect(() => {
+        if (!draftKey) return;
+        const key = `hugh.draft.${draftKey}`;
+        const handle = setTimeout(() => {
+            try {
+                if (text) localStorage.setItem(key, text);
+                else localStorage.removeItem(key);
+            } catch {
+                // best-effort
+            }
+        }, 300);
+        return () => clearTimeout(handle);
+    }, [draftKey, text]);
 
     const submit = () => {
         const trimmed = text.trim();

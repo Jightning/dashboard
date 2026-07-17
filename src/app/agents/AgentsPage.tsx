@@ -29,10 +29,14 @@ export function AgentsPage({
     tab,
     sessionId,
     onNavigate,
+    onTabChange,
+    onSessionOpened,
 }: {
     tab?: string;
     sessionId?: string | null;
     onNavigate?: (t: NavTarget) => void;
+    onTabChange?: (tab: string) => void;
+    onSessionOpened?: (id: string | null) => void;
 } = {}) {
     const [active, setActive] = useState<Tab>(isTab(tab) ? tab : "chat");
     useEffect(() => {
@@ -42,13 +46,21 @@ export function AgentsPage({
     return (
         <div className="flex h-full flex-col">
             <div className="px-6 pt-4">
-                <TabBar tabs={TABS} active={active} onSelect={setActive} />
+                <TabBar
+                    tabs={TABS}
+                    active={active}
+                    onSelect={(t) => {
+                        setActive(t);
+                        onTabChange?.(t);
+                    }}
+                />
             </div>
             {active === "chat" ? (
                 <div className="min-h-0 flex-1">
                     <ChatWorkspace
                         initialSessionId={sessionId}
                         onNavigate={onNavigate}
+                        onSessionOpened={onSessionOpened}
                     />
                 </div>
             ) : (

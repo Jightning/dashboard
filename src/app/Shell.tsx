@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { Sidebar, type Page, type NavTarget } from "./Sidebar";
 import { HomePage } from "./home/HomePage";
@@ -13,6 +13,7 @@ import { GridBackground } from "@/components/hud/GridBackground";
 import { StatusBar } from "@/components/hud/StatusBar";
 import { StatusReadouts } from "@/components/hud/StatusReadouts";
 import { CommandPalette } from "@/components/palette/CommandPalette";
+import { loadNav, saveNav } from "@/lib/navPersist";
 import { useRuntime } from "./runtime";
 
 const PAGES: Record<Page, () => React.JSX.Element> = {
@@ -29,7 +30,18 @@ const PAGES: Record<Page, () => React.JSX.Element> = {
 };
 
 export function Shell() {
-    const [nav, setNav] = useState<NavTarget>({ page: "home" });
+    const [nav, setNav] = useState<NavTarget>(() => loadNav() ?? { page: "home" });
+    useEffect(() => {
+        saveNav(nav);
+    }, [nav]);
+    const onTabChange = useCallback(
+        (tab: string) => setNav((n) => ({ ...n, tab })),
+        [],
+    );
+    const onSessionOpened = useCallback(
+        (id: string | null) => setNav((n) => ({ ...n, sessionId: id ?? undefined })),
+        [],
+    );
     const { settings } = useRuntime();
     const Active = PAGES[nav.page];
 
@@ -61,6 +73,8 @@ export function Shell() {
                                     tab={nav.tab}
                                     sessionId={nav.sessionId}
                                     onNavigate={setNav}
+                                    onTabChange={onTabChange}
+                                    onSessionOpened={onSessionOpened}
                                 />
                             ) : nav.page === "categories" ? (
                                 <CategoriesPage
@@ -68,9 +82,9 @@ export function Shell() {
                                     initialProjectId={nav.projectId}
                                 />
                             ) : nav.page === "notes" ? (
-                                <NotesPage tab={nav.tab} />
+                                <NotesPage tab={nav.tab} onTabChange={onTabChange} />
                             ) : nav.page === "planner" ? (
-                                <PlannerPage tab={nav.tab} />
+                                <PlannerPage tab={nav.tab} onTabChange={onTabChange} />
                             ) : (
                                 <Active />
                             )}

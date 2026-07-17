@@ -32,7 +32,13 @@ const TABS: { id: NotesTab; label: string }[] = [
 const isTab = (t: string | undefined): t is NotesTab =>
     TABS.some((x) => x.id === t);
 
-export function NotesPage({ tab }: { tab?: string } = {}) {
+export function NotesPage({
+    tab,
+    onTabChange,
+}: {
+    tab?: string;
+    onTabChange?: (tab: string) => void;
+} = {}) {
     const [active, setActive] = useState<NotesTab>(isTab(tab) ? tab : "notes");
     useEffect(() => {
         if (isTab(tab)) setActive(tab);
@@ -41,7 +47,14 @@ export function NotesPage({ tab }: { tab?: string } = {}) {
     return (
         <div className="flex h-full flex-col">
             <div className="px-6 pt-4">
-                <TabBar tabs={TABS} active={active} onSelect={setActive} />
+                <TabBar
+                    tabs={TABS}
+                    active={active}
+                    onSelect={(t) => {
+                        setActive(t);
+                        onTabChange?.(t);
+                    }}
+                />
             </div>
             {active === "notes" ? (
                 <div className="min-h-0 flex-1">
