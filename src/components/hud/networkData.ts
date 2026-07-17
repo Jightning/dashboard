@@ -8,12 +8,14 @@
  * its sessions and files clustered around it, the newest unfiled sessions as
  * their own stars, and older ones folded into a single expandable archive star.
  */
-import type { ChatSession, Document, Preset, Project } from "@/lib/schemas";
+import type { Category, ChatSession, Document, Preset, Project } from "@/lib/schemas";
 import { agentSlug, agentToolNames, presetAgents, type AgentDef } from "@/lib/schemas";
+import { effectiveCategoryId } from "@/lib/categories";
 import { agentColor } from "./AgentNode";
 import { fibonacciSphere, tangentOffset, type Vec3 } from "./sphere";
 
-export type NodeKind = "session" | "agent" | "tool" | "doc" | "project" | "archive";
+export type NodeKind =
+    | "session" | "agent" | "tool" | "doc" | "project" | "archive" | "category";
 
 export interface NodeMeta {
     title: string;
@@ -41,6 +43,8 @@ export interface NetworkNode {
     meta: NodeMeta;
     /** Domain payload for the click handler (e.g. the ChatSession). */
     payload?: unknown;
+    /** Radius multiplier: 1 = main sphere, >1 = exo-sphere (older overflow). */
+    shell?: number;
 }
 
 export interface NetworkEdge {
@@ -349,6 +353,193 @@ export function buildUniverseNetwork(opts: {
             });
         }
     }
+
+    return net;
+}
+
+export const CATEGORY_INNER = 8;
+export const EXO_SHELL = 1.4;
+export const UNFILED_ID = "unfiled";
+
+/**
+ * Category-first universe. Top level (focusCategoryId null): one star per
+ * category plus an "unfiled" star when untagged chats exist. Focused on a
+ * category (or the "unfiled" sentinel): its projects as stars with their
+ * chats/files clustered, direct chats as stars — newest CATEGORY_INNER on
+ * the main sphere, the rest pushed to the exo-shell (shell EXO_SHELL),
+ * reachable by zooming out.
+ */
+export function buildCategoryUniverse(opts: {
+    categories: Category[];
+    projects: Project[];
+    sessions: ChatSession[];
+    documents: Pick<Document, "id" | "title" | "project_id">[];
+    presets: Preset[];
+    agents: AgentDef[];
+    focusCategoryId: string | null;
+}): Network {
+    const presetById = new Map(opts.presets.map((p) => [p.id, p]));
+    const agentsById = new Map(opts.agents.map((a) => [a.id, a]));
+    const projectById = new Map(opts.projects.map((p) => [p.id, p]));
+    const net: Network = { nodes: [], edges: [] };
+    const catOf = (s: ChatSession) => effectiveCategoryId(s, projectById);
+
+    if (opts.focusCategoryId === null) {
+        const unfiled = opts.sessions.filter((s) => catOf(s) === null);
+        const stars = opts.categories.length + (unfiled.length > 0 ? 1 : 0);
+        const units = fibonacciSphere(Math.max(1, stars));
+        let slot = 0;
+        for (const c of opts.categories) {
+            const chats = opts.sessions.filter((s) => catOf(s) === c.id).length;
+            const projects = opts.projects.filter((p) => p.category_id === c.id).length;
+            net.nodes.push({
+                id: `category:${c.id}`,
+                kind: "category",
+                label: c.name,
+                color: c.color ?? "var(--primary)",
+                unit: units[slot++]!,
+                r: PROJECT_R + 0.4,
+                primary: true,
+                meta: {
+                    title: c.name,
+                    subtitle: "Click to open this category's sphere.",
+                    foot: `${chats} chat${chats === 1 ? "" : "s"} · ${projects} project${projects === 1 ? "" : "s"}`,
+                },
+                payload: { categoryId: c.id },
+            });
+        }
+        if (unfiled.length > 0) {
+            net.nodes.push({
+                id: `category:${UNFILED_ID}`,
+                kind: "category",
+                label: "unfiled",
+                color: ARCHIVE_COLOR,
+                unit: units[slot++]!,
+                r: PROJECT_R,
+                primary: true,
+                meta: {
+                    title: `${unfiled.length} unfiled chats`,
+                    subtitle: "Chats without a category. Click to open.",
+                },
+                payload: { categoryId: UNFILED_ID },
+            });
+        }
+        return net;
+    }
+
+    const focusId = opts.focusCategoryId;
+    const projects = opts.projects.filter(
+        (p) => focusId !== UNFILED_ID && p.category_id === focusId,
+    );
+    const projectIds = new Set(projects.map((p) => p.id));
+    const direct = opts.sessions
+        .filter((s) =>
+            focusId === UNFILED_ID
+                ? catOf(s) === null
+                : catOf(s) === focusId && !projectIds.has(s.project_id ?? ""),
+        )
+        .sort((a, b) => b.updated_at - a.updated_at);
+    const inner = direct.slice(0, CATEGORY_INNER);
+    const exo = direct.slice(CATEGORY_INNER);
+
+    const hubUnits = fibonacciSphere(Math.max(1, projects.length + inner.length));
+    let slot = 0;
+
+    for (const project of projects) {
+        const unit = hubUnits[slot++]!;
+        const hubId = `project:${project.id}`;
+        const color = project.color ?? "var(--primary)";
+        const docs = opts.documents
+            .filter((d) => d.project_id === project.id)
+            .slice(0, PROJECT_DOC_SAT);
+        const sessions = opts.sessions
+            .filter((s) => s.project_id === project.id)
+            .slice(0, PROJECT_SESSION_SAT);
+        net.nodes.push({
+            id: hubId,
+            kind: "project",
+            label: project.name,
+            color,
+            unit,
+            r: PROJECT_R,
+            primary: true,
+            meta: {
+                title: project.name,
+                subtitle: project.description ?? "project",
+                foot: `${sessions.length} chats · ${docs.length} files`,
+            },
+            payload: { project },
+        });
+        docs.forEach((doc, i) => {
+            const dUnit = satelliteUnit(unit, i, docs.length, TOOL_SPREAD);
+            const id = `${hubId}:doc:${doc.id}`;
+            net.nodes.push({
+                id, kind: "doc", label: doc.title, color, unit: dUnit,
+                r: TOOL_R, parentId: hubId, primary: false,
+                meta: { title: doc.title, subtitle: `file · ${project.name}` },
+            });
+            net.edges.push({ a: hubId, b: id });
+        });
+        sessions.forEach((s, i) => {
+            const sUnit = satelliteUnit(unit, i, sessions.length, AGENT_SPREAD);
+            const preset = s.preset_id ? presetById.get(s.preset_id) : undefined;
+            const id = `session:${s.id}`;
+            net.nodes.push({
+                id, kind: "session", label: s.title,
+                color: sessionColor(s, preset, agentsById),
+                unit: sUnit, r: AGENT_R, parentId: hubId, primary: true,
+                meta: {
+                    title: s.title,
+                    subtitle: preset ? preset.name : "no preset",
+                    foot: `updated ${relativeTime(s.updated_at)}`,
+                },
+                payload: s,
+            });
+            net.edges.push({ a: hubId, b: id });
+        });
+    }
+
+    for (const s of inner) {
+        const unit = hubUnits[slot++]!;
+        const preset = s.preset_id ? presetById.get(s.preset_id) : undefined;
+        net.nodes.push({
+            id: `session:${s.id}`,
+            kind: "session",
+            label: s.title,
+            color: sessionColor(s, preset, agentsById),
+            unit,
+            r: HUB_R,
+            primary: true,
+            meta: {
+                title: s.title,
+                subtitle: preset ? preset.name : "no preset",
+                foot: `updated ${relativeTime(s.updated_at)}`,
+            },
+            payload: s,
+        });
+    }
+
+    // Overflow: older chats orbit outside the chart circle — scroll out.
+    const exoUnits = fibonacciSphere(Math.max(1, exo.length));
+    exo.forEach((s, i) => {
+        const preset = s.preset_id ? presetById.get(s.preset_id) : undefined;
+        net.nodes.push({
+            id: `session:${s.id}`,
+            kind: "session",
+            label: s.title,
+            color: sessionColor(s, preset, agentsById),
+            unit: exoUnits[i]!,
+            r: AGENT_R,
+            shell: EXO_SHELL,
+            primary: true,
+            meta: {
+                title: s.title,
+                subtitle: preset ? preset.name : "no preset",
+                foot: `exo-sphere · updated ${relativeTime(s.updated_at)}`,
+            },
+            payload: s,
+        });
+    });
 
     return net;
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildUniverseNetwork } from "./networkData";
-import type { AgentDef, ChatSession, Preset, Project } from "@/lib/schemas";
+import { buildCategoryUniverse, buildUniverseNetwork } from "./networkData";
+import type { AgentDef, Category, ChatSession, Preset, Project } from "@/lib/schemas";
 
 function session(id: string, over: Partial<ChatSession> = {}): ChatSession {
     return {
@@ -99,5 +99,52 @@ describe("buildUniverseNetwork", () => {
             expanded: false,
         });
         expect(net.nodes.find((n) => n.kind === "archive")).toBeUndefined();
+    });
+});
+
+describe("buildCategoryUniverse", () => {
+    const cat = (id: string, name: string): Category => ({
+        id, name, color: "#22d3ee", created_at: 0, updated_at: 0,
+    });
+
+    it("top level: one star per category plus unfiled", () => {
+        const net = buildCategoryUniverse({
+            categories: [cat("cat_a", "School")],
+            projects: [],
+            sessions: [session("ses_1", { category_id: "cat_a" }), session("ses_2")],
+            documents: [], presets: [], agents: [],
+            focusCategoryId: null,
+        });
+        const kinds = net.nodes.map((n) => n.kind);
+        expect(kinds.filter((k) => k === "category")).toHaveLength(2); // School + unfiled
+        expect(net.nodes.find((n) => n.id === "category:cat_a")!.meta.foot).toContain("1 chat");
+    });
+
+    it("focused: newest chats inner, overflow on the exo shell", () => {
+        const sessions = Array.from({ length: 12 }, (_, i) =>
+            session(`ses_${i}`, { category_id: "cat_a", updated_at: 100 - i }),
+        );
+        const net = buildCategoryUniverse({
+            categories: [cat("cat_a", "School")],
+            projects: [], sessions, documents: [], presets: [], agents: [],
+            focusCategoryId: "cat_a",
+        });
+        const chats = net.nodes.filter((n) => n.kind === "session");
+        expect(chats).toHaveLength(12);
+        expect(chats.filter((n) => (n.shell ?? 1) > 1)).toHaveLength(12 - 8);
+        // Newest stay inner.
+        expect(chats.find((n) => n.id === "session:ses_0")!.shell ?? 1).toBe(1);
+    });
+
+    it("focused unfiled shows only unfiled sessions", () => {
+        const net = buildCategoryUniverse({
+            categories: [cat("cat_a", "School")],
+            projects: [],
+            sessions: [session("ses_a", { category_id: "cat_a" }), session("ses_b")],
+            documents: [], presets: [], agents: [],
+            focusCategoryId: "unfiled",
+        });
+        expect(net.nodes.filter((n) => n.kind === "session").map((n) => n.id))
+            .toEqual(["session:ses_b"]);
     });
 });

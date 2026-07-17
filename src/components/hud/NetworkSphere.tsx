@@ -66,6 +66,8 @@ export function NetworkSphere({
     const movedRef = useRef(false);
     const lastPtrRef = useRef({ x: 0, y: 0 });
     const lastInteractionRef = useRef(0);
+    const zoomRef = useRef(1);
+    const wrapRef = useRef<HTMLDivElement>(null);
 
     const setHovered = useCallback((id: string | null) => {
         hoveredRef.current = id;
@@ -110,7 +112,11 @@ export function NetworkSphere({
             const proj: { cx: number; cy: number; depth: number }[] = [];
             for (let i = 0; i < nodes.length; i++) {
                 const node = nodes[i]!;
-                const p = projectQuat(node.unit, orient, RADIUS);
+                const p = projectQuat(
+                    node.unit,
+                    orient,
+                    RADIUS * zoomRef.current * (node.shell ?? 1),
+                );
                 proj.push(p);
                 const focus = hoveredRoot ? roots[i] === hoveredRoot : true;
                 const dim = hoveredRoot != null && !focus;
@@ -119,6 +125,7 @@ export function NetworkSphere({
                 if (node.kind === "tool") op *= 0.8;
                 if (dim) op *= 0.22;
                 else if (hoveredRoot && focus) op = Math.min(1, op * 1.4);
+                if ((node.shell ?? 1) > 1) op *= 0.6;
 
                 const rScale =
                     (0.6 + 0.4 * p.depth) * (hoveredRoot && focus ? 1.15 : 1);
@@ -292,17 +299,36 @@ export function NetworkSphere({
             e.currentTarget.releasePointerCapture(e.pointerId);
     }, []);
 
+    // Wheel → zoom. React's onWheel is passive, so preventDefault needs a
+    // manually-attached, non-passive listener on the wrapper.
+    useEffect(() => {
+        const el = wrapRef.current;
+        if (!el) return;
+        const onWheel = (e: WheelEvent) => {
+            e.preventDefault();
+            zoomRef.current = Math.min(
+                1.1,
+                Math.max(0.55, zoomRef.current * (e.deltaY > 0 ? 0.92 : 1.08)),
+            );
+            lastInteractionRef.current = performance.now();
+            if (reduced) draw();
+        };
+        el.addEventListener("wheel", onWheel, { passive: false });
+        return () => el.removeEventListener("wheel", onWheel);
+    }, [reduced, draw]);
+
     const hoveredNode =
         hoveredId && byId.has(hoveredId) ? nodes[byId.get(hoveredId)!]! : null;
 
     // Seed positions for first paint (before the loop runs).
     const seed = useMemo(
-        () => nodes.map((n) => projectQuat(n.unit, INITIAL_ORIENT, RADIUS)),
+        () => nodes.map((n) => projectQuat(n.unit, INITIAL_ORIENT, RADIUS * (n.shell ?? 1))),
         [nodes],
     );
 
     return (
         <div
+            ref={wrapRef}
             className={cn(
                 "relative cursor-grab touch-none select-none active:cursor-grabbing",
                 className,

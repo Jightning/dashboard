@@ -45,6 +45,7 @@ import { TokenMeter } from "@/components/chat/TokenMeter";
 import { NetworkSphere } from "@/components/hud/NetworkSphere";
 import {
     buildAgentTypeNetwork,
+    buildCategoryUniverse,
     buildUniverseNetwork,
 } from "@/components/hud/networkData";
 import { Typewriter } from "@/components/hud/Typewriter";
@@ -75,6 +76,7 @@ export function ChatWorkspace({
         Pick<Document, "id" | "title" | "project_id">[]
     >([]);
     const [archiveOpen, setArchiveOpen] = useState(false);
+    const [sphereFocus, setSphereFocus] = useState<string | null>(null);
     const [active, setActive] = useState<ActiveChat | null>(null);
     const [error, setError] = useState<string | null>(null);
     // Session id highlighted by hovering a sphere node or a sidebar row.
@@ -155,25 +157,49 @@ export function ChatWorkspace({
         [openSession],
     );
 
-    // No chat selected → the universe: project stars, recent chats, and an
-    // archive star; with nothing yet, the static agent-type topology as an intro.
-    const network = useMemo(
-        () =>
-            sessions.length || projects.length
-                ? buildUniverseNetwork({
-                      projects,
-                      sessions,
-                      documents: docs,
-                      presets,
-                      agents,
-                      expanded: archiveOpen,
-                  })
-                : buildAgentTypeNetwork(agents),
-        [sessions, projects, docs, presets, agents, archiveOpen],
-    );
+    // No chat selected → the universe. With categories, one star per category
+    // (drill in to see its projects/chats, older ones pushed to an exo-shell);
+    // otherwise the flat universe: project stars, recent chats, and an archive
+    // star; with nothing yet, the static agent-type topology as an intro.
+    const network = useMemo(() => {
+        if (categories.length > 0) {
+            return buildCategoryUniverse({
+                categories,
+                projects,
+                sessions,
+                documents: docs,
+                presets,
+                agents,
+                focusCategoryId: sphereFocus,
+            });
+        }
+        return sessions.length || projects.length
+            ? buildUniverseNetwork({
+                  projects,
+                  sessions,
+                  documents: docs,
+                  presets,
+                  agents,
+                  expanded: archiveOpen,
+              })
+            : buildAgentTypeNetwork(agents);
+    }, [
+        sessions,
+        projects,
+        docs,
+        presets,
+        agents,
+        archiveOpen,
+        categories,
+        sphereFocus,
+    ]);
 
     const openFromNode = useCallback(
         (node: { kind: string; payload?: unknown }) => {
+            if (node.kind === "category") {
+                setSphereFocus((node.payload as { categoryId: string }).categoryId);
+                return;
+            }
             if (node.kind === "archive") {
                 setArchiveOpen((v) => !v);
                 return;
@@ -311,9 +337,17 @@ export function ChatWorkspace({
                         <div className="font-mono text-sm uppercase tracking-[0.2em] text-primary text-glow">
                             <Typewriter text="standing by" />
                         </div>
+                        {sphereFocus && (
+                            <button
+                                className="cursor-pointer font-mono text-[10px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
+                                onClick={() => setSphereFocus(null)}
+                            >
+                                ← all categories
+                            </button>
+                        )}
                         <p className="text-xs text-muted-foreground">
                             {sessions.length
-                                ? "Hover a node or row to link them · click to open."
+                                ? "Hover a node or row to link them · click to open · scroll to zoom."
                                 : "Start a chat from a preset in the sidebar."}
                         </p>
                     </div>
