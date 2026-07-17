@@ -10,18 +10,24 @@ import {
     Trash2,
     X,
 } from "lucide-react";
-import { agentSlug, presetAgents } from "@/lib/schemas";
+import { agentSlug, presetAgents, sessionTags } from "@/lib/schemas";
 import type {
     AgentDef,
+    Category,
     ChatSession,
     PermissionLevel,
     Preset,
     Project,
 } from "@/lib/schemas";
-import { sessionMessageCount } from "@/db/repo/messages";
+import { effectiveCategoryId } from "@/lib/categories";
+import { searchSessionIds, sessionMessageCount } from "@/db/repo/messages";
+import { setSessionCategory, setSessionProject } from "@/db/repo/sessions";
 import { agentColor } from "@/components/hud/AgentNode";
 import { relativeTime, sessionColor } from "@/components/hud/networkData";
 import { cn } from "@/lib/utils";
+import { FilterChips } from "@/components/ui/filterChips";
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 
 /** Swatches for user recoloring — the agent identity hues plus neutrals. */
 export const SESSION_COLORS = [
@@ -37,6 +43,7 @@ export const SESSION_COLORS = [
 export function InstancesSidebar({
     sessions,
     projects,
+    categories,
     presets,
     levels,
     agents,
@@ -48,9 +55,11 @@ export function InstancesSidebar({
     onNewChat,
     onRename,
     onRecolor,
+    onFiled,
 }: {
     sessions: ChatSession[];
     projects: Project[];
+    categories: Category[];
     presets: Preset[];
     levels: PermissionLevel[];
     agents: AgentDef[];
@@ -62,6 +71,7 @@ export function InstancesSidebar({
     onNewChat: (preset: Preset) => void;
     onRename: (session: ChatSession, title: string) => void;
     onRecolor: (session: ChatSession, color: string | null) => void;
+    onFiled: () => void;
 }) {
     const [collapsed, setCollapsed] = useState(false);
     const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -69,6 +79,9 @@ export function InstancesSidebar({
     const [counts, setCounts] = useState<Record<string, number>>({});
     const [renamingId, setRenamingId] = useState<string | null>(null);
     const [draftTitle, setDraftTitle] = useState("");
+    const [query, setQuery] = useState("");
+    const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
+    const [contentHits, setContentHits] = useState<Set<string> | null>(null);
     const rowRefs = useRef<Record<string, HTMLDivElement | null>>({});
     // Enter/Escape commit or cancel the rename synchronously and unmount the
     // input, which fires a native blur on the way out. This ref lets onBlur
@@ -99,15 +112,45 @@ export function InstancesSidebar({
         if (highlightId) rowRefs.current[highlightId]?.scrollIntoView({ block: "nearest" });
     }, [highlightId]);
 
+    // Debounced full-text pass over message content; title/tag matching is local.
+    useEffect(() => {
+        const q = query.trim();
+        if (!q) {
+            setContentHits(null);
+            return;
+        }
+        const handle = setTimeout(() => {
+            void searchSessionIds(q).then((ids) => setContentHits(new Set(ids)));
+        }, 200);
+        return () => clearTimeout(handle);
+    }, [query]);
+
+    const projectById = useMemo(
+        () => new Map(projects.map((p) => [p.id, p])),
+        [projects],
+    );
+    const q = query.trim().toLowerCase();
+    const visible = sessions.filter((s) => {
+        if (
+            categoryFilter &&
+            effectiveCategoryId(s, projectById) !== categoryFilter
+        )
+            return false;
+        if (!q) return true;
+        if (s.title.toLowerCase().includes(q)) return true;
+        if (sessionTags(s).some((t) => t.toLowerCase().includes(q))) return true;
+        return contentHits?.has(s.id) ?? false;
+    });
+
     // Grouped list: each project's chats under a header, then the unfiled rest.
     const projectIds = new Set(projects.map((p) => p.id));
     const groups = projects
         .map((p) => ({
             project: p,
-            rows: sessions.filter((s) => s.project_id === p.id),
+            rows: visible.filter((s) => s.project_id === p.id),
         }))
         .filter((g) => g.rows.length > 0);
-    const unfiled = sessions.filter(
+    const unfiled = visible.filter(
         (s) => s.project_id === null || !projectIds.has(s.project_id),
     );
 
@@ -290,6 +333,65 @@ export function InstancesSidebar({
                         <Detail label="Updated">
                             {relativeTime(s.updated_at)}
                         </Detail>
+                        {s.auto_summary && (
+                            <p className="text-left text-muted-foreground">
+                                {s.auto_summary}
+                            </p>
+                        )}
+                        {sessionTags(s).length > 0 && (
+                            <Detail label="Tags">
+                                <div className="flex flex-wrap justify-end gap-1">
+                                    {sessionTags(s).map((t) => (
+                                        <span
+                                            key={t}
+                                            className="rounded-sm bg-muted px-1 py-0.5 font-mono text-[9px]"
+                                        >
+                                            {t}
+                                        </span>
+                                    ))}
+                                </div>
+                            </Detail>
+                        )}
+                        <Detail label="Project">
+                            <Select
+                                className="h-6 w-32 text-[10px]"
+                                value={s.project_id ?? ""}
+                                onChange={(e) =>
+                                    void setSessionProject(
+                                        s.id,
+                                        e.target.value || null,
+                                    ).then(onFiled)
+                                }
+                            >
+                                <option value="">—</option>
+                                {projects.map((p) => (
+                                    <option key={p.id} value={p.id}>
+                                        {p.name}
+                                    </option>
+                                ))}
+                            </Select>
+                        </Detail>
+                        <Detail label="Category">
+                            <Select
+                                className="h-6 w-32 text-[10px]"
+                                value={s.category_id ?? ""}
+                                onChange={(e) =>
+                                    void setSessionCategory(
+                                        s.id,
+                                        e.target.value || null,
+                                    ).then(onFiled)
+                                }
+                            >
+                                <option value="">
+                                    {s.project_id ? "inherit from project" : "—"}
+                                </option>
+                                {categories.map((c) => (
+                                    <option key={c.id} value={c.id}>
+                                        {c.name}
+                                    </option>
+                                ))}
+                            </Select>
+                        </Detail>
                         <Detail label="Color">
                             <div className="flex flex-wrap justify-end gap-1">
                                 {SESSION_COLORS.map((c) => (
@@ -371,6 +473,24 @@ export function InstancesSidebar({
                 >
                     <PanelLeftClose className="h-4 w-4" />
                 </IconButton>
+            </div>
+
+            <div className="flex flex-col gap-2 px-2 pb-2">
+                <Input
+                    value={query}
+                    placeholder="Search chats…"
+                    onChange={(e) => setQuery(e.target.value)}
+                    className="h-8 text-xs"
+                />
+                <FilterChips
+                    options={categories.map((c) => ({
+                        id: c.id,
+                        label: c.name,
+                        color: c.color ?? undefined,
+                    }))}
+                    active={categoryFilter}
+                    onChange={setCategoryFilter}
+                />
             </div>
 
             {/* New chat from a preset */}

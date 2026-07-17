@@ -28,8 +28,10 @@ import { listLevels } from "@/db/repo/permissions";
 import { listAgents } from "@/db/repo/agents";
 import { listProjects } from "@/db/repo/projects";
 import { listDocuments } from "@/db/repo/documents";
+import { listCategories } from "@/db/repo/categories";
 import type {
     AgentDef,
+    Category,
     ChatSession,
     Document,
     PermissionLevel,
@@ -68,6 +70,7 @@ export function ChatWorkspace({
     const [levels, setLevels] = useState<PermissionLevel[]>([]);
     const [agents, setAgents] = useState<AgentDef[]>([]);
     const [projects, setProjects] = useState<Project[]>([]);
+    const [categories, setCategories] = useState<Category[]>([]);
     const [docs, setDocs] = useState<
         Pick<Document, "id" | "title" | "project_id">[]
     >([]);
@@ -86,6 +89,7 @@ export function ChatWorkspace({
             setLevels(await listLevels());
             setAgents(await listAgents());
             setProjects(await listProjects());
+            setCategories(await listCategories());
             setDocs(await listDocuments());
         })();
     }, []);
@@ -237,6 +241,7 @@ export function ChatWorkspace({
             <InstancesSidebar
                 sessions={sessions}
                 projects={projects}
+                categories={categories}
                 presets={presets}
                 levels={levels}
                 agents={agents}
@@ -248,6 +253,7 @@ export function ChatWorkspace({
                 onNewChat={(p) => void newChat(p)}
                 onRename={(s, t) => void renameInstance(s, t)}
                 onRecolor={(s, c) => void recolorInstance(s, c)}
+                onFiled={() => void sessionsRepo.listSessions().then(setSessions)}
             />
 
             <div className="flex min-w-0 flex-1 flex-col">
