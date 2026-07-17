@@ -33,12 +33,17 @@ export function TemplateEditor({
     const backdropRef = useRef<HTMLDivElement>(null);
     const known = new Set(knownTokens);
 
-    // Padding/font/rounding match the shared Textarea (src/components/ui/input.tsx)
+    // Padding/font/rounding match the shared Input/Textarea (src/components/ui/input.tsx)
     // exactly, so this drop-in replacement is visually seamless: px-3 py-2,
-    // text-sm, rounded-md, min-h-16. whitespace-pre-wrap/break-words make the
-    // backdrop wrap identically to a native textarea.
-    const shared =
-        "w-full min-h-16 whitespace-pre-wrap break-words rounded-md px-3 py-2 text-sm";
+    // text-sm, rounded-md. whitespace-pre-wrap/break-words make the backdrop
+    // wrap identically to a native textarea. Min-height follows `rows`: a
+    // single-row field matches Input's h-9, anything bigger matches
+    // Textarea's min-h-16 — a rows=1 field pinned to min-h-16 would tower
+    // over the h-9 fields next to it.
+    const shared = cn(
+        "w-full whitespace-pre-wrap break-words rounded-md px-3 py-2 text-sm",
+        rows <= 1 ? "min-h-9" : "min-h-16",
+    );
 
     return (
         <div className="relative">
@@ -47,7 +52,10 @@ export function TemplateEditor({
                 aria-hidden
                 className={cn(
                     shared,
-                    "pointer-events-none absolute inset-0 overflow-hidden border border-transparent text-foreground",
+                    // Field fill lives here, not on the textarea — the textarea's
+                    // background must stay transparent so the pills underneath
+                    // aren't occluded, but the field still needs to look filled.
+                    "pointer-events-none absolute inset-0 overflow-hidden border border-transparent bg-background/50 text-foreground",
                 )}
             >
                 {value.split(TOKEN_SPLIT).map((seg, i) => {
