@@ -51,9 +51,15 @@ export function TasksTab() {
                 categories={categories}
                 onAdd={(input) => act(() => tasksRepo.createTask(input))}
                 onCreateCategory={async (name) => {
-                    const c = await categoriesRepo.createCategory({ name });
-                    await reload();
-                    return c.id;
+                    setError(null);
+                    try {
+                        const c = await categoriesRepo.createCategory({ name });
+                        await reload();
+                        return c.id;
+                    } catch (e) {
+                        setError(e instanceof Error ? e.message : String(e));
+                        return null;
+                    }
                 }}
             />
             <FilterChips
@@ -81,13 +87,14 @@ function QuickAdd({
 }: {
     categories: Category[];
     onAdd: (input: tasksRepo.TaskInput) => Promise<void>;
-    onCreateCategory: (name: string) => Promise<string>;
+    onCreateCategory: (name: string) => Promise<string | null>;
 }) {
     const [title, setTitle] = useState("");
     const [due, setDue] = useState("");
     const [categoryId, setCategoryId] = useState("");
     const [creating, setCreating] = useState(false);
     const [newCategory, setNewCategory] = useState("");
+    const [savingCategory, setSavingCategory] = useState(false);
     const [recurrence, setRecurrence] = useState("");
     const [submitting, setSubmitting] = useState(false);
 
@@ -140,12 +147,23 @@ function QuickAdd({
                         placeholder="name…"
                         onChange={(e) => setNewCategory(e.target.value)}
                         onKeyDown={(e) => {
-                            if (e.key === "Enter" && newCategory.trim())
-                                void onCreateCategory(newCategory).then((id) => {
-                                    setCategoryId(id);
-                                    setCreating(false);
-                                    setNewCategory("");
-                                });
+                            if (
+                                e.key === "Enter" &&
+                                !e.repeat &&
+                                !savingCategory &&
+                                newCategory.trim()
+                            ) {
+                                setSavingCategory(true);
+                                void onCreateCategory(newCategory.trim())
+                                    .then((id) => {
+                                        if (id) {
+                                            setCategoryId(id);
+                                            setCreating(false);
+                                            setNewCategory("");
+                                        }
+                                    })
+                                    .finally(() => setSavingCategory(false));
+                            }
                             if (e.key === "Escape") setCreating(false);
                         }}
                     />
