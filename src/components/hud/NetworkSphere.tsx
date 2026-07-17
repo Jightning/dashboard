@@ -252,6 +252,14 @@ export function NetworkSphere({
         if (reduced) draw();
     }, [highlightId, reduced, draw]);
 
+    // Reset zoom when the sphere's dataset changes (e.g. a breadcrumb click
+    // swaps in a new category/project sphere) — otherwise a zoomed-out view
+    // carries over onto data it was never meant for and looks broken.
+    useEffect(() => {
+        zoomRef.current = 1;
+        if (reduced) draw();
+    }, [nodes, reduced, draw]);
+
     // Reduced motion: no rAF, but re-draw on hover change (static positions).
     useEffect(() => {
         if (reduced) draw();

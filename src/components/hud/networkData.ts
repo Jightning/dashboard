@@ -211,12 +211,10 @@ export function buildUniverseNetwork(opts: {
         const unit = hubUnits[slot++]!;
         const hubId = `project:${project.id}`;
         const color = project.color ?? "var(--primary)";
-        const docs = opts.documents
-            .filter((d) => d.project_id === project.id)
-            .slice(0, PROJECT_DOC_SAT);
-        const sessions = filed
-            .filter((s) => s.project_id === project.id)
-            .slice(0, PROJECT_SESSION_SAT);
+        const allDocs = opts.documents.filter((d) => d.project_id === project.id);
+        const allSessions = filed.filter((s) => s.project_id === project.id);
+        const docs = allDocs.slice(0, PROJECT_DOC_SAT);
+        const sessions = allSessions.slice(0, PROJECT_SESSION_SAT);
         net.nodes.push({
             id: hubId,
             kind: "project",
@@ -229,7 +227,7 @@ export function buildUniverseNetwork(opts: {
                 title: project.name,
                 subtitle: project.description ?? "project",
                 chips: docs.map((d) => ({ label: d.title })),
-                foot: `${sessions.length} chats · ${docs.length} files`,
+                foot: `${allSessions.length} chats · ${allDocs.length} files`,
             },
             payload: { project },
         });
@@ -449,12 +447,10 @@ export function buildCategoryUniverse(opts: {
         const unit = hubUnits[slot++]!;
         const hubId = `project:${project.id}`;
         const color = project.color ?? "var(--primary)";
-        const docs = opts.documents
-            .filter((d) => d.project_id === project.id)
-            .slice(0, PROJECT_DOC_SAT);
-        const sessions = opts.sessions
-            .filter((s) => s.project_id === project.id)
-            .slice(0, PROJECT_SESSION_SAT);
+        const allDocs = opts.documents.filter((d) => d.project_id === project.id);
+        const allSessions = opts.sessions.filter((s) => s.project_id === project.id);
+        const docs = allDocs.slice(0, PROJECT_DOC_SAT);
+        const sessions = allSessions.slice(0, PROJECT_SESSION_SAT);
         net.nodes.push({
             id: hubId,
             kind: "project",
@@ -466,7 +462,7 @@ export function buildCategoryUniverse(opts: {
             meta: {
                 title: project.name,
                 subtitle: project.description ?? "project",
-                foot: `${sessions.length} chats · ${docs.length} files`,
+                foot: `${allSessions.length} chats · ${allDocs.length} files`,
             },
             payload: { project },
         });

@@ -75,7 +75,8 @@ export async function categoryCounts(id: string): Promise<CategoryCounts> {
         `SELECT
             (SELECT COUNT(*) FROM projects WHERE category_id = ?) AS projects,
             (SELECT COUNT(*) FROM chat_sessions WHERE category_id = ?
-                OR project_id IN (SELECT id FROM projects WHERE category_id = ?)) AS sessions,
+                OR (category_id IS NULL
+                    AND project_id IN (SELECT id FROM projects WHERE category_id = ?))) AS sessions,
             (SELECT COUNT(*) FROM tasks WHERE category_id = ? AND completed_at IS NULL) AS tasks,
             (SELECT COUNT(*) FROM notes WHERE category_id = ?) AS notes`,
         [id, id, id, id, id],

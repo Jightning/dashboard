@@ -360,7 +360,11 @@ export function InstancesSidebar({
                                     void setSessionProject(
                                         s.id,
                                         e.target.value || null,
-                                    ).then(onFiled)
+                                    )
+                                        .then(onFiled)
+                                        .catch((err: unknown) =>
+                                            console.warn("session project refresh failed:", err),
+                                        )
                                 }
                             >
                                 <option value="">—</option>
@@ -379,7 +383,11 @@ export function InstancesSidebar({
                                     void setSessionCategory(
                                         s.id,
                                         e.target.value || null,
-                                    ).then(onFiled)
+                                    )
+                                        .then(onFiled)
+                                        .catch((err: unknown) =>
+                                            console.warn("session category refresh failed:", err),
+                                        )
                                 }
                             >
                                 <option value="">

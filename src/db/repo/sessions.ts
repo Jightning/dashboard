@@ -51,7 +51,8 @@ export async function listSessions(filter?: {
         rows = await getDb().select(
             `SELECT * FROM chat_sessions
              WHERE category_id = ?
-                OR project_id IN (SELECT id FROM projects WHERE category_id = ?)
+                OR (category_id IS NULL
+                    AND project_id IN (SELECT id FROM projects WHERE category_id = ?))
              ORDER BY updated_at DESC`,
             [filter.categoryId, filter.categoryId],
         );

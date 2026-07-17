@@ -24,6 +24,13 @@
 
 - Project stars don't navigate on click yet (hover only explains them) — revisit if it feels dead in practice.
 - `notes.project_id` (project-scoped notes) was deliberately skipped as YAGNI; add if project detail pages need it.
+- Calendar day bucketing uses fixed 24h math — items can shift a bucket across DST changes.
+- corsProxy is mounted in dev AND preview; running vite with --host exposes an open relay to the LAN — dev-only by design, don't expose.
+- A flashcard generation whose approvals are denied still reports the tool-call count; copy could mislead.
+- Chat auto-naming skips a session if you switch away mid-stream (self-heals next exchange).
+- Project stars cap satellites at 6 chats/5 files; extra chats are reachable via the sidebar, not the sphere.
+- FTS insert isn't transactional with the message insert; interrupted boot backfill doesn't resume (revisit with WHERE NOT IN if it ever bites).
+- searchSessionIds comment previously claimed ordering it didn't have (fix the comment now as part of this commit — src/db/repo/messages.ts).
 
 ## 2026-07-17 — Categories & Signal plan
 

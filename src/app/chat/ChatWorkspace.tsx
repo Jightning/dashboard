@@ -313,9 +313,13 @@ export function ChatWorkspace({
                                 preset: active.preset,
                                 settings,
                                 texts,
-                            }).then(async (wrote) => {
-                                if (wrote) setSessions(await sessionsRepo.listSessions());
-                            });
+                            })
+                                .then(async (wrote) => {
+                                    if (wrote) setSessions(await sessionsRepo.listSessions());
+                                })
+                                .catch((e: unknown) =>
+                                    console.warn("session list refresh failed:", e),
+                                );
                         }}
                     />
                 ) : (

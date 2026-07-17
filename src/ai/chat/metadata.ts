@@ -42,9 +42,15 @@ export async function maybeGenerateSessionMeta(opts: {
     /** Plain text of the conversation so far (user + assistant turns). */
     texts: string[];
 }): Promise<boolean> {
-    if (!isDefaultTitle(opts.session.title, opts.preset.name)) return false;
     if (opts.texts.length < 2) return false;
     try {
+        // The caller's `session` object is a stale snapshot — it isn't patched
+        // after a previous auto-rename — so re-read the title from the DB
+        // before trusting the default-title guard. Otherwise a session that
+        // was already renamed keeps looking "default" forever and this fires
+        // (and calls the router model) on every streaming→ready transition.
+        const current = await sessionsRepo.getSession(opts.session.id);
+        if (!isDefaultTitle(current.title, opts.preset.name)) return false;
         const model = createModel(
             {
                 provider: opts.preset.provider as ProviderId,

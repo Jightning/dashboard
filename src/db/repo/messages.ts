@@ -126,7 +126,7 @@ export function extractTextParts(partsJson: string): string {
     }
 }
 
-/** Session ids with any message matching the query, newest activity first. */
+/** Session ids with any message matching the query. No defined order — used as a match set, not a ranking. */
 export async function searchSessionIds(query: string): Promise<string[]> {
     const fts = toFtsQuery(query);
     if (!fts) return [];

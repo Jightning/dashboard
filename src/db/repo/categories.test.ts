@@ -69,4 +69,20 @@ describe("categories repo", () => {
         await setSessionCategory(s.id, null);
         expect((await getSession(s.id)).category_id).toBeNull();
     });
+
+    it("a session's own category wins over its project's, in both listSessions and categoryCounts", async () => {
+        const a = await createCategory({ name: "A" });
+        const b = await createCategory({ name: "B" });
+        const p = await createProject({ name: "Under B", categoryId: b.id });
+        // Filed under project p (category B) but explicitly tagged category A.
+        const s = await createSession({ title: "own tag wins", projectId: p.id, categoryId: a.id });
+
+        expect((await listSessions({ categoryId: a.id })).map((x) => x.id)).toEqual([s.id]);
+        expect((await listSessions({ categoryId: b.id })).map((x) => x.id)).toEqual([]);
+
+        const countsA = await categoryCounts(a.id);
+        const countsB = await categoryCounts(b.id);
+        expect(countsA.sessions).toBe(1);
+        expect(countsB.sessions).toBe(0);
+    });
 });
