@@ -11,6 +11,7 @@ import { PresetsPage } from "./presets/PresetsPage";
 import { PermissionsPage } from "./permissions/PermissionsPage";
 import { GridBackground } from "@/components/hud/GridBackground";
 import { StatusBar } from "@/components/hud/StatusBar";
+import { StatusReadouts } from "@/components/hud/StatusReadouts";
 import { CommandPalette } from "@/components/palette/CommandPalette";
 import { useRuntime } from "./runtime";
 
@@ -79,9 +80,13 @@ export function Shell() {
             </div>
             <StatusBar>
                 <span>db linked</span>
-                <span>
+                <button
+                    className="cursor-pointer hover:text-foreground"
+                    onClick={() => setNav({ page: "settings" })}
+                >
                     {settings.defaultProvider}/{settings.defaultModel}
-                </span>
+                </button>
+                <StatusReadouts onNavigate={setNav} />
             </StatusBar>
             <CommandPalette onNavigate={setNav} />
         </div>
