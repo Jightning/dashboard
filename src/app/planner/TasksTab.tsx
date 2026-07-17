@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Check, Plus, Trash2 } from "lucide-react";
+import { Check, Plus, RotateCcw, Trash2 } from "lucide-react";
 import * as tasksRepo from "@/db/repo/tasks";
 import * as categoriesRepo from "@/db/repo/categories";
 import type { Recurrence } from "@/lib/recurrence";
@@ -12,11 +12,31 @@ import type { Category, Task } from "@/lib/schemas";
 
 const DAY = 86_400_000;
 
+type DueWindow = "overdue" | "today" | "week";
+const DUE_WINDOWS: { id: DueWindow; label: string }[] = [
+    { id: "overdue", label: "Overdue" },
+    { id: "today", label: "Today" },
+    { id: "week", label: "This week" },
+];
+
+function inDueWindow(t: Task, w: DueWindow): boolean {
+    if (t.due_at === null) return false;
+    const now = Date.now();
+    if (w === "overdue") return t.due_at < now;
+    const eod = new Date();
+    eod.setHours(23, 59, 59, 999);
+    if (w === "today") return t.due_at <= eod.getTime();
+    return t.due_at <= now + 7 * DAY;
+}
+
 export function TasksTab() {
     const [tasks, setTasks] = useState<Task[]>([]);
     const [categories, setCategories] = useState<Category[]>([]);
     const [error, setError] = useState<string | null>(null);
     const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
+    const [dueWindow, setDueWindow] = useState<DueWindow | null>(null);
+    const [showCompleted, setShowCompleted] = useState(false);
+    const [completed, setCompleted] = useState<Task[]>([]);
 
     const reload = useCallback(async () => {
         setTasks(await tasksRepo.listOpenTasks());
@@ -33,6 +53,10 @@ export function TasksTab() {
             setCategoryFilter(null);
         }
     }, [categories, categoryFilter]);
+
+    useEffect(() => {
+        if (showCompleted) void tasksRepo.listCompletedTasks().then(setCompleted);
+    }, [showCompleted, tasks]);
 
     const act = async (fn: () => Promise<unknown>) => {
         setError(null);
@@ -71,11 +95,60 @@ export function TasksTab() {
                 active={categoryFilter}
                 onChange={setCategoryFilter}
             />
+            <FilterChips
+                options={DUE_WINDOWS}
+                active={dueWindow}
+                onChange={(id) => setDueWindow(id as DueWindow | null)}
+                allLabel="Any due date"
+            />
             <TaskList
-                tasks={categoryFilter ? tasks.filter((t) => t.category_id === categoryFilter) : tasks}
+                tasks={tasks.filter(
+                    (t) =>
+                        (!categoryFilter || t.category_id === categoryFilter) &&
+                        (!dueWindow || inDueWindow(t, dueWindow)),
+                )}
                 categories={categories}
                 act={act}
             />
+            <button
+                className="cursor-pointer self-start font-mono text-[10px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
+                onClick={() => setShowCompleted((v) => !v)}
+            >
+                {showCompleted ? "hide completed" : "show completed"}
+            </button>
+            {showCompleted && (
+                <div className="flex flex-col gap-1.5 opacity-70">
+                    {completed.map((t) => (
+                        <div
+                            key={t.id}
+                            className="flex items-center gap-3 rounded-md border border-border/60 bg-card/40 px-3 py-2"
+                        >
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                aria-label={`Reopen ${t.title}`}
+                                onClick={() => void act(() => tasksRepo.reopenTask(t.id))}
+                            >
+                                <RotateCcw className="h-4 w-4" />
+                            </Button>
+                            <span className="flex-1 text-sm line-through decoration-muted-foreground/50">
+                                {t.title}
+                            </span>
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                aria-label={`Delete ${t.title}`}
+                                onClick={() => void act(() => tasksRepo.deleteTask(t.id))}
+                            >
+                                <Trash2 className="h-4 w-4" />
+                            </Button>
+                        </div>
+                    ))}
+                    {completed.length === 0 && (
+                        <p className="text-xs text-muted-foreground">Nothing completed yet.</p>
+                    )}
+                </div>
+            )}
         </div>
     );
 }
