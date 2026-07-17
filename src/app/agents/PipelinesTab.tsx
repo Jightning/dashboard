@@ -7,6 +7,7 @@ import { toScopedGrant } from "@/ai/permissions/engine";
 import { PermissionContext } from "@/ai/tools/context";
 import { buildPipelineRuntime } from "@/ai/agents/runtime";
 import { runPipeline } from "@/ai/pipelines/runner";
+import { instantiateTemplate, PIPELINE_TEMPLATES } from "@/ai/pipelines/templates";
 import { appFetch } from "@/ai/providers/appFetch";
 import { useRuntime } from "@/app/runtime";
 import { ApprovalCards } from "@/components/chat/ApprovalCard";
@@ -167,10 +168,40 @@ export function PipelinesTab() {
                         >
                             {runsFor === p.id ? "hide runs" : "show runs"}
                         </button>
-                        {runsFor === p.id && <RunHistory runs={runs} />}
+                        {runsFor === p.id && (
+                            <RunHistory runs={runs} pipelineName={p.name} />
+                        )}
                     </CardContent>
                 </Card>
             ))}
+
+            {!editing && (
+                <div className="flex flex-col gap-2">
+                    <h2 className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground/70">
+                        Start from a template
+                    </h2>
+                    <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                        {PIPELINE_TEMPLATES.map((t) => (
+                            <button
+                                key={t.name}
+                                className="cursor-pointer rounded-md border border-border p-3 text-left transition-colors hover:border-primary/40"
+                                onClick={() =>
+                                    void instantiateTemplate(t).then(async (p) => {
+                                        setRunInput(t.exampleInput);
+                                        await reload();
+                                        setEditing(p);
+                                    })
+                                }
+                            >
+                                <div className="text-sm">{t.name}</div>
+                                <div className="text-xs text-muted-foreground">
+                                    {t.description}
+                                </div>
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            )}
 
             {editing ? (
                 <PipelineEditor

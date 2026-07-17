@@ -150,7 +150,12 @@ export function AutomationsTab() {
                         >
                             {runsFor === a.id ? "hide runs" : "show runs"}
                         </button>
-                        {runsFor === a.id && <RunHistory runs={runs} />}
+                        {runsFor === a.id && (
+                            <RunHistory
+                                runs={runs}
+                                pipelineName={pipelineName(a.pipeline_id)}
+                            />
+                        )}
                     </CardContent>
                 </Card>
             ))}

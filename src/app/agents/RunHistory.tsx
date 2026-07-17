@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { listStepRuns } from "@/db/repo/pipelines";
+import { createNote } from "@/db/repo/notes";
 import type { PipelineRun, PipelineStepRun, RunStatus } from "@/lib/schemas";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 
 const TONE: Record<RunStatus, "primary" | "success" | "destructive"> = {
     running: "primary",
@@ -10,21 +12,34 @@ const TONE: Record<RunStatus, "primary" | "success" | "destructive"> = {
     error: "destructive",
 };
 
-export function RunHistory({ runs }: { runs: PipelineRun[] }) {
+export function RunHistory({
+    runs,
+    pipelineName,
+}: {
+    runs: PipelineRun[];
+    pipelineName: string;
+}) {
     if (runs.length === 0)
         return <p className="text-xs text-muted-foreground">No runs yet.</p>;
     return (
         <div className="flex flex-col gap-1.5">
             {runs.map((run) => (
-                <RunRow key={run.id} run={run} />
+                <RunRow key={run.id} run={run} pipelineName={pipelineName} />
             ))}
         </div>
     );
 }
 
-function RunRow({ run }: { run: PipelineRun }) {
+function RunRow({
+    run,
+    pipelineName,
+}: {
+    run: PipelineRun;
+    pipelineName: string;
+}) {
     const [open, setOpen] = useState(false);
     const [steps, setSteps] = useState<PipelineStepRun[]>([]);
+    const [saved, setSaved] = useState(false);
 
     useEffect(() => {
         if (open) void listStepRuns(run.id).then(setSteps);
@@ -66,6 +81,25 @@ function RunRow({ run }: { run: PipelineRun }) {
                             </pre>
                         </div>
                     ))}
+                    {run.status === "success" && steps.length > 0 && (
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            className="self-start"
+                            disabled={saved}
+                            onClick={() => {
+                                const last = steps[steps.length - 1];
+                                if (!last?.output) return;
+                                void createNote({
+                                    title: `${pipelineName} — ${new Date(run.started_at).toLocaleDateString()}`,
+                                    folder: "/pipelines",
+                                    bodyMd: last.output,
+                                }).then(() => setSaved(true));
+                            }}
+                        >
+                            {saved ? "Saved to /pipelines" : "Save as note"}
+                        </Button>
+                    )}
                 </div>
             )}
         </div>
