@@ -18,6 +18,7 @@ import {
     rowToUiMessage,
     type SessionChatContext,
 } from "@/ai/chat/transport";
+import { maybeGenerateSessionMeta } from "@/ai/chat/metadata";
 import { UsageCollector } from "@/ai/context/tokens";
 import type { PermissionContext } from "@/ai/tools/context";
 import * as sessionsRepo from "@/db/repo/sessions";
@@ -263,7 +264,28 @@ export function ChatWorkspace({
                 )}
 
                 {active ? (
-                    <ActiveChatView key={active.session.id} active={active} />
+                    <ActiveChatView
+                        key={active.session.id}
+                        active={active}
+                        onExchangeDone={(msgs) => {
+                            const texts = msgs
+                                .map((m) =>
+                                    m.parts
+                                        .filter((p) => p.type === "text")
+                                        .map((p) => (p as { text: string }).text)
+                                        .join("\n"),
+                                )
+                                .filter(Boolean);
+                            void maybeGenerateSessionMeta({
+                                session: active.session,
+                                preset: active.preset,
+                                settings,
+                                texts,
+                            }).then(async (wrote) => {
+                                if (wrote) setSessions(await sessionsRepo.listSessions());
+                            });
+                        }}
+                    />
                 ) : (
                     <div className="flex flex-1 flex-col items-center justify-center gap-3">
                         <NetworkSphere
@@ -340,7 +362,13 @@ function LevelDropdown({
     );
 }
 
-function ActiveChatView({ active }: { active: ActiveChat }) {
+function ActiveChatView({
+    active,
+    onExchangeDone,
+}: {
+    active: ActiveChat;
+    onExchangeDone: (messages: UIMessage[]) => void;
+}) {
     const { settings } = useRuntime();
     const [totals, setTotals] = useState({
         inputTokens: 0,
@@ -375,6 +403,15 @@ function ActiveChatView({ active }: { active: ActiveChat }) {
     });
 
     const busy = status === "streaming" || status === "submitted";
+
+    // Fires once per completed exchange (streaming -> ready), not on every
+    // render — lets the workspace try auto-naming/tagging/summarizing.
+    const prevStatus = useRef(status);
+    useEffect(() => {
+        if (prevStatus.current === "streaming" && status === "ready")
+            onExchangeDone(messages);
+        prevStatus.current = status;
+    }, [status, messages, onExchangeDone]);
 
     const vision = supportsVision({
         provider: active.preset.provider as ProviderId,
