@@ -66,7 +66,14 @@ export function CalendarTab() {
         ? items.filter((i) => i.categoryId === categoryFilter)
         : items;
 
-    const step = mode === "month" ? 30 * DAY : (mode === "7d" ? 7 : 14) * DAY;
+    const shift = (dir: 1 | -1) =>
+        setAnchor((a) => {
+            if (mode !== "month") return a + dir * ((mode === "7d" ? 7 : 14) * DAY);
+            const d = new Date(a);
+            d.setDate(1);
+            d.setMonth(d.getMonth() + dir);
+            return d.getTime();
+        });
 
     return (
         <div className="flex flex-col gap-4">
@@ -92,7 +99,7 @@ export function CalendarTab() {
                     variant="ghost"
                     size="icon"
                     aria-label="Earlier"
-                    onClick={() => setAnchor((a) => a - step)}
+                    onClick={() => shift(-1)}
                 >
                     <ChevronLeft className="h-4 w-4" />
                 </Button>
@@ -100,7 +107,7 @@ export function CalendarTab() {
                     variant="ghost"
                     size="icon"
                     aria-label="Later"
-                    onClick={() => setAnchor((a) => a + step)}
+                    onClick={() => shift(1)}
                 >
                     <ChevronRight className="h-4 w-4" />
                 </Button>
