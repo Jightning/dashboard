@@ -40,6 +40,7 @@ function RunRow({
     const [open, setOpen] = useState(false);
     const [steps, setSteps] = useState<PipelineStepRun[]>([]);
     const [saved, setSaved] = useState(false);
+    const [saveError, setSaveError] = useState<string | null>(null);
 
     useEffect(() => {
         if (open) void listStepRuns(run.id).then(setSteps);
@@ -82,23 +83,39 @@ function RunRow({
                         </div>
                     ))}
                     {run.status === "success" && steps.length > 0 && (
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            className="self-start"
-                            disabled={saved}
-                            onClick={() => {
-                                const last = steps[steps.length - 1];
-                                if (!last?.output) return;
-                                void createNote({
-                                    title: `${pipelineName} — ${new Date(run.started_at).toLocaleDateString()}`,
-                                    folder: "/pipelines",
-                                    bodyMd: last.output,
-                                }).then(() => setSaved(true));
-                            }}
-                        >
-                            {saved ? "Saved to /pipelines" : "Save as note"}
-                        </Button>
+                        <div className="flex flex-col items-start gap-1">
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                className="self-start"
+                                disabled={saved}
+                                onClick={() => {
+                                    const last = steps[steps.length - 1];
+                                    if (!last?.output) return;
+                                    setSaveError(null);
+                                    void createNote({
+                                        title: `${pipelineName} — ${new Date(run.started_at).toLocaleDateString()}`,
+                                        folder: "/pipelines",
+                                        bodyMd: last.output,
+                                    })
+                                        .then(() => setSaved(true))
+                                        .catch((e: unknown) =>
+                                            setSaveError(
+                                                e instanceof Error
+                                                    ? e.message
+                                                    : String(e),
+                                            ),
+                                        );
+                                }}
+                            >
+                                {saved ? "Saved to /pipelines" : "Save as note"}
+                            </Button>
+                            {saveError && (
+                                <p className="font-mono text-xs text-destructive">
+                                    {saveError}
+                                </p>
+                            )}
+                        </div>
                     )}
                 </div>
             )}

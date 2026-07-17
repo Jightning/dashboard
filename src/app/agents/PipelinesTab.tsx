@@ -186,11 +186,19 @@ export function PipelinesTab() {
                                 key={t.name}
                                 className="cursor-pointer rounded-md border border-border p-3 text-left transition-colors hover:border-primary/40"
                                 onClick={() =>
-                                    void instantiateTemplate(t).then(async (p) => {
-                                        setRunInput(t.exampleInput);
-                                        await reload();
-                                        setEditing(p);
-                                    })
+                                    void instantiateTemplate(t)
+                                        .then(async (p) => {
+                                            setRunInput(t.exampleInput);
+                                            await reload();
+                                            setEditing(p);
+                                        })
+                                        .catch((e: unknown) =>
+                                            setError(
+                                                e instanceof Error
+                                                    ? e.message
+                                                    : String(e),
+                                            ),
+                                        )
                                 }
                             >
                                 <div className="text-sm">{t.name}</div>
