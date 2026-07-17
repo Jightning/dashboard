@@ -1,6 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, afterEach, describe, expect, it } from "vitest";
 import { PermissionContext } from "./context";
 import { buildToolSet, TOOL_CATALOG } from "./catalog";
+import { createTestDbClient } from "@/db/testClient";
+import { setDb } from "@/db/client";
+import { seedBuiltinAgents } from "@/db/repo/agents";
+import { listAgents } from "@/db/repo/agents";
+import { agentToolNames } from "@/lib/schemas";
 
 const deps = {
     permissions: new PermissionContext(),
@@ -27,5 +32,24 @@ describe("tool catalog", () => {
         expect(() => buildToolSet(["run_shell"], deps)).toThrow(
             /unknown tool.*run_shell/,
         );
+    });
+});
+
+describe("catalog covers builtin agents", () => {
+    let db: ReturnType<typeof createTestDbClient>;
+    beforeEach(() => {
+        db = createTestDbClient();
+        setDb(db);
+    });
+    afterEach(() => db.close());
+
+    it("every builtin agent tool is a catalog entry (and therefore grantable)", async () => {
+        await seedBuiltinAgents();
+        const catalog = new Set(TOOL_CATALOG.map((t) => t.name));
+        for (const agent of await listAgents()) {
+            for (const tool of agentToolNames(agent)) {
+                expect(catalog, `${agent.name} uses ungrantable tool`).toContain(tool);
+            }
+        }
     });
 });

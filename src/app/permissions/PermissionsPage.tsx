@@ -1,22 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { Trash2 } from "lucide-react";
 import * as repo from "@/db/repo/permissions";
+import { TOOL_CATALOG } from "@/ai/tools/catalog";
 import type { PermissionGrant, PermissionLevel } from "@/lib/schemas";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-
-/** Tools a grant can currently target; grows as dashboard features land. */
-const KNOWN_TOOLS = [
-    "search_documents",
-    "read_document",
-    "list_documents",
-    "search_notes",
-    "read_note",
-    "list_notes",
-    "fetch_url",
-];
 
 export function PermissionsPage() {
     const [levels, setLevels] = useState<PermissionLevel[]>([]);
@@ -93,7 +83,7 @@ function LevelCard({
     grants: PermissionGrant[];
     onChanged: () => Promise<void>;
 }) {
-    const [tool, setTool] = useState(KNOWN_TOOLS[0]!);
+    const [tool, setTool] = useState(TOOL_CATALOG[0]!.name);
     const [access, setAccess] = useState<"read" | "write">("read");
     const [scopeType, setScopeType] = useState<
         "any" | "doc_folder" | "url_domain"
@@ -180,11 +170,20 @@ function LevelCard({
                 {!level.is_builtin && (
                     <div className="mt-2 flex flex-wrap items-center gap-2">
                         <Select
+                            aria-label="Tool"
                             value={tool}
-                            onChange={(e) => setTool(e.target.value)}
+                            onChange={(e) => {
+                                setTool(e.target.value);
+                                const entry = TOOL_CATALOG.find(
+                                    (t) => t.name === e.target.value,
+                                );
+                                if (entry) setAccess(entry.access);
+                            }}
                         >
-                            {KNOWN_TOOLS.map((t) => (
-                                <option key={t}>{t}</option>
+                            {TOOL_CATALOG.map((t) => (
+                                <option key={t.name} value={t.name}>
+                                    {t.label} ({t.name})
+                                </option>
                             ))}
                         </Select>
                         <Select
