@@ -403,11 +403,13 @@ function QuickCapture({
     const [text, setText] = useState("");
     const [saving, setSaving] = useState(false);
     const [saved, setSaved] = useState<string | null>(null);
+    const [error, setError] = useState<string | null>(null);
 
     const capture = async (kind: "task" | "note") => {
         const title = text.trim();
         if (!title || saving) return;
         setSaving(true);
+        setError(null);
         try {
             if (kind === "task") {
                 await createTask({ title });
@@ -418,7 +420,7 @@ function QuickCapture({
             }
             setText("");
         } catch (e) {
-            setSaved(e instanceof Error ? e.message : String(e));
+            setError(e instanceof Error ? e.message : String(e));
         } finally {
             setSaving(false);
         }
@@ -432,6 +434,7 @@ function QuickCapture({
                 onChange={(e) => {
                     setText(e.target.value);
                     setSaved(null);
+                    setError(null);
                 }}
                 onKeyDown={(e) => {
                     if (e.key === "Enter" && !e.repeat) void capture("task");
@@ -448,6 +451,11 @@ function QuickCapture({
             >
                 Note
             </Button>
+            {error && (
+                <span className="whitespace-nowrap font-mono text-[10px] uppercase tracking-wider text-destructive">
+                    {error}
+                </span>
+            )}
             {saved && (
                 <button
                     className="cursor-pointer whitespace-nowrap font-mono text-[10px] uppercase tracking-wider text-muted-foreground hover:text-foreground"

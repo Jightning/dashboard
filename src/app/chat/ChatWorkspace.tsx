@@ -90,6 +90,10 @@ export function ChatWorkspace({
     const [hoveredInstanceId, setHoveredInstanceId] = useState<string | null>(
         null,
     );
+    // Tracks the last session id opened via openSession, so the deep-link
+    // effect below doesn't re-open a session that a click already opened
+    // (which would clobber active.permissions.broker mid-approval).
+    const lastOpenedRef = useRef<string | null>(null);
 
     useEffect(() => {
         void (async () => {
@@ -103,9 +107,19 @@ export function ChatWorkspace({
         })();
     }, []);
 
+    // If the category backing the active filter chip gets deleted, fall back
+    // to "All" instead of silently showing an empty instance list (mirrors
+    // TasksTab's guard).
+    useEffect(() => {
+        if (categoryFilter && !categories.some((c) => c.id === categoryFilter)) {
+            setCategoryFilter(null);
+        }
+    }, [categories, categoryFilter]);
+
     const openSession = useCallback(
         async (session: ChatSession) => {
             setError(null);
+            lastOpenedRef.current = session.id;
             try {
                 if (!session.preset_id)
                     throw new Error("session has no preset");
@@ -142,15 +156,22 @@ export function ChatWorkspace({
     );
 
     // Deep link (e.g. "open this project chat" from the Projects page).
+    // Skipped when openSession already handled this id (e.g. a sidebar
+    // click that round-tripped through Shell's onSessionOpened → this
+    // prop) — re-running it would double-open the session.
     useEffect(() => {
-        if (!initialSessionId) return;
+        if (!initialSessionId || initialSessionId === lastOpenedRef.current)
+            return;
         void sessionsRepo
             .getSession(initialSessionId)
             .then(openSession)
-            .catch((e: unknown) =>
-                setError(e instanceof Error ? e.message : String(e)),
-            );
-    }, [initialSessionId, openSession]);
+            .catch(() => {
+                // Restored/stale session id (e.g. from persisted nav) that no
+                // longer exists — drop silently and let boot fall through to
+                // the sphere instead of banner-erroring on every launch.
+                onSessionOpened?.(null);
+            });
+    }, [initialSessionId, openSession, onSessionOpened]);
 
     // Where a new chat files itself: the sphere's focused category wins,
     // else the sidebar's active filter. "unfiled" means explicitly nowhere.
@@ -255,9 +276,15 @@ export function ChatWorkspace({
             try {
                 await sessionsRepo.deleteSession(session.id);
                 setSessions(await sessionsRepo.listSessions());
+                try {
+                    localStorage.removeItem(`hugh.draft.${session.id}`);
+                } catch {
+                    // best-effort
+                }
                 if (active?.session.id === session.id) {
                     setActive(null);
                     onSessionOpened?.(null);
+                    lastOpenedRef.current = null;
                 }
             } catch (e) {
                 setError(e instanceof Error ? e.message : String(e));

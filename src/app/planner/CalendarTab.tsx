@@ -61,8 +61,10 @@ export function CalendarTab() {
         try {
             await fn();
             await reload();
+            return true;
         } catch (e) {
             setError(e instanceof Error ? e.message : String(e));
+            return false;
         }
     };
 
@@ -179,7 +181,7 @@ function QuickEvent({
         startsAt: number;
         endsAt: number;
         location: string | null;
-    }) => Promise<void>;
+    }) => Promise<boolean>;
 }) {
     const [title, setTitle] = useState("");
     const [start, setStart] = useState("");
@@ -192,15 +194,17 @@ function QuickEvent({
         setSaving(true);
         try {
             const startsAt = new Date(start).getTime();
-            await onAdd({
+            const ok = await onAdd({
                 title: title.trim(),
                 startsAt,
                 endsAt: startsAt + Math.max(5, Number(minutes) || 60) * 60_000,
                 location: location.trim() || null,
             });
-            setTitle("");
-            setStart("");
-            setLocation("");
+            if (ok) {
+                setTitle("");
+                setStart("");
+                setLocation("");
+            }
         } finally {
             setSaving(false);
         }
@@ -411,7 +415,7 @@ function CoursesPanel({
     reload,
 }: {
     courses: Course[];
-    act: (fn: () => Promise<unknown>) => Promise<void>;
+    act: (fn: () => Promise<unknown>) => Promise<boolean>;
     reload: () => Promise<void>;
 }) {
     const [code, setCode] = useState("");

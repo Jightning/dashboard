@@ -21,7 +21,7 @@ export function StatusReadouts({
     onNavigate: (t: NavTarget) => void;
 }) {
     const [dueToday, setDueToday] = useState<number | null>(null);
-    const [nextRun, setNextRun] = useState<number | null>(null);
+    const [nextRunLabel, setNextRunLabel] = useState<string | null>(null);
 
     useEffect(() => {
         const refresh = async () => {
@@ -32,7 +32,13 @@ export function StatusReadouts({
                     .filter((a) => a.enabled === 1 && a.next_run_at !== null)
                     .map((a) => a.next_run_at!)
                     .sort((a, b) => a - b)[0];
-                setNextRun(next ?? null);
+                // A freshly-computed string (not the raw timestamp) so the
+                // relative label ("in 4m") keeps re-rendering each poll
+                // instead of freezing on the first value once the underlying
+                // next_run_at timestamp stops changing.
+                setNextRunLabel(
+                    next !== undefined && next !== null ? relativeTime(next) : null,
+                );
             } catch {
                 // keep last values
             }
@@ -52,12 +58,12 @@ export function StatusReadouts({
                     {dueToday} due today
                 </button>
             )}
-            {nextRun !== null && (
+            {nextRunLabel && (
                 <button
                     className="cursor-pointer hover:text-foreground"
                     onClick={() => onNavigate({ page: "agents", tab: "automations" })}
                 >
-                    next run {relativeTime(nextRun)}
+                    next run {nextRunLabel}
                 </button>
             )}
         </>

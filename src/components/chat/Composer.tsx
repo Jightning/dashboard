@@ -74,7 +74,18 @@ export function Composer({
                 // best-effort
             }
         }, 300);
-        return () => clearTimeout(handle);
+        return () => {
+            clearTimeout(handle);
+            // Flush synchronously on unmount/session switch so a pending
+            // debounced write isn't silently dropped (e.g. typing then
+            // immediately switching sessions).
+            try {
+                if (text) localStorage.setItem(key, text);
+                else localStorage.removeItem(key);
+            } catch {
+                // best-effort
+            }
+        };
     }, [draftKey, text]);
 
     const submit = () => {

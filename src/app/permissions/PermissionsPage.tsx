@@ -186,15 +186,12 @@ function LevelCard({
                                 </option>
                             ))}
                         </Select>
-                        <Select
-                            value={access}
-                            onChange={(e) =>
-                                setAccess(e.target.value as "read" | "write")
-                            }
+                        <span
+                            className="rounded bg-muted px-2 py-1 font-mono text-xs uppercase text-muted-foreground"
+                            title="Access is fixed per tool"
                         >
-                            <option value="read">read</option>
-                            <option value="write">write</option>
-                        </Select>
+                            {access}
+                        </span>
                         <Select
                             value={scopeType}
                             onChange={(e) =>

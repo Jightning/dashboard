@@ -1,16 +1,18 @@
 import type { NavTarget, Page } from "@/app/Sidebar";
 
 const KEY = "hugh.nav.v1";
-const PAGES: readonly Page[] = [
-    "home",
-    "agents",
-    "categories",
-    "notes",
-    "planner",
-    "presets",
-    "permissions",
-    "settings",
-];
+// Exhaustively checked so adding a Page member without updating this list is
+// a compile error, unlike an easily-forgotten array literal.
+const PAGES: Record<Page, true> = {
+    home: true,
+    agents: true,
+    categories: true,
+    notes: true,
+    planner: true,
+    presets: true,
+    permissions: true,
+    settings: true,
+};
 
 /** Last nav position, or null when unset/corrupt. Never throws. */
 export function loadNav(): NavTarget | null {
@@ -18,7 +20,8 @@ export function loadNav(): NavTarget | null {
         const raw = localStorage.getItem(KEY);
         if (!raw) return null;
         const parsed = JSON.parse(raw) as Record<string, unknown>;
-        if (!PAGES.includes(parsed.page as Page)) return null;
+        if (typeof parsed.page !== "string" || !(parsed.page in PAGES))
+            return null;
         const nav: NavTarget = { page: parsed.page as Page };
         if (typeof parsed.tab === "string") nav.tab = parsed.tab;
         if (typeof parsed.sessionId === "string") nav.sessionId = parsed.sessionId;
