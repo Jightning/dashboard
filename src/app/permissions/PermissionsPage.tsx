@@ -84,7 +84,9 @@ function LevelCard({
     onChanged: () => Promise<void>;
 }) {
     const [tool, setTool] = useState(TOOL_CATALOG[0]!.name);
-    const [access, setAccess] = useState<"read" | "write">("read");
+    const [access, setAccess] = useState<"read" | "write">(
+        TOOL_CATALOG[0]!.access,
+    );
     const [scopeType, setScopeType] = useState<
         "any" | "doc_folder" | "url_domain"
     >("any");

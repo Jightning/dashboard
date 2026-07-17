@@ -26,6 +26,9 @@ describe("nav persistence", () => {
         expect(loadNav()).toBeNull();
         localStorage.setItem("hugh.nav.v1", "not json");
         expect(loadNav()).toBeNull();
+        // Prototype-chain members must not validate as pages.
+        localStorage.setItem("hugh.nav.v1", JSON.stringify({ page: "constructor" }));
+        expect(loadNav()).toBeNull();
     });
 
     it("keeps sessionId and projectId strings only", () => {

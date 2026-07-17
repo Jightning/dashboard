@@ -20,7 +20,9 @@ export function loadNav(): NavTarget | null {
         const raw = localStorage.getItem(KEY);
         if (!raw) return null;
         const parsed = JSON.parse(raw) as Record<string, unknown>;
-        if (typeof parsed.page !== "string" || !(parsed.page in PAGES))
+        // Object.hasOwn, not `in`: "constructor" etc. live on the prototype
+        // chain and must not validate as pages.
+        if (typeof parsed.page !== "string" || !Object.hasOwn(PAGES, parsed.page))
             return null;
         const nav: NavTarget = { page: parsed.page as Page };
         if (typeof parsed.tab === "string") nav.tab = parsed.tab;
