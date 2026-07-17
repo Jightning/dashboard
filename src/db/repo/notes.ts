@@ -8,17 +8,19 @@ export async function createNote(opts: {
     title?: string;
     folder?: string;
     bodyMd?: string;
+    categoryId?: string | null;
 }): Promise<Note> {
     const id = newId("note");
     const ts = now();
     await getDb().execute(
-        `INSERT INTO notes (id, title, folder, body_md, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO notes (id, title, folder, body_md, category_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
         [
             id,
             opts.title?.trim() || "Untitled",
             normalizeFolder(opts.folder ?? "/"),
             opts.bodyMd ?? "",
+            opts.categoryId ?? null,
             ts,
             ts,
         ],
@@ -32,32 +34,46 @@ export async function getNote(id: string): Promise<Note> {
     return noteSchema.parse(rows[0]);
 }
 
-export async function listNotes(folder?: string): Promise<NoteSummary[]> {
+export async function listNotes(filter?: {
+    folder?: string;
+    categoryId?: string;
+}): Promise<NoteSummary[]> {
     const sql =
         "SELECT id, title, folder, category_id, created_at, updated_at FROM notes";
-    const normalized = folder ? normalizeFolder(folder) : null;
-    const scoped =
-        normalized !== null && normalized !== "/" ? normalized : null;
-    const rows = scoped
-        ? await getDb().select(
-              `${sql} WHERE folder = ? OR folder LIKE ? ORDER BY updated_at DESC`,
-              [scoped, `${scoped}/%`],
-          )
-        : await getDb().select(`${sql} ORDER BY updated_at DESC`);
+    const where: string[] = [];
+    const params: unknown[] = [];
+    const normalized = filter?.folder ? normalizeFolder(filter.folder) : null;
+    if (normalized !== null && normalized !== "/") {
+        where.push("(folder = ? OR folder LIKE ?)");
+        params.push(normalized, `${normalized}/%`);
+    }
+    if (filter?.categoryId !== undefined) {
+        where.push("category_id = ?");
+        params.push(filter.categoryId);
+    }
+    const rows = await getDb().select(
+        `${sql}${where.length ? ` WHERE ${where.join(" AND ")}` : ""} ORDER BY updated_at DESC`,
+        params,
+    );
     return rows.map((r) => noteSchema.omit({ body_md: true }).parse(r));
 }
 
 export async function updateNote(
     id: string,
-    fields: { title: string; folder: string; bodyMd: string },
+    fields: { title: string; folder: string; bodyMd: string; categoryId?: string | null },
 ): Promise<void> {
+    // categoryId is optional so existing callers that only edit title/folder/body
+    // (e.g. NotesPage's autosave) don't silently clear a note's category:
+    // undefined preserves the current value, null explicitly clears it.
+    const cur = await getNote(id);
     const res = await getDb().execute(
-        `UPDATE notes SET title = ?, folder = ?, body_md = ?, updated_at = ?
+        `UPDATE notes SET title = ?, folder = ?, body_md = ?, category_id = ?, updated_at = ?
          WHERE id = ?`,
         [
             fields.title.trim() || "Untitled",
             normalizeFolder(fields.folder),
             fields.bodyMd,
+            fields.categoryId === undefined ? cur.category_id : fields.categoryId,
             now(),
             id,
         ],

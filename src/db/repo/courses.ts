@@ -11,6 +11,7 @@ export async function createCourse(input: {
     color?: string | null;
 }): Promise<Course> {
     const id = newId("crs");
+    const t = now();
     await getDb().execute(
         `INSERT INTO courses (id, code, name, term, folder, color, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -21,8 +22,18 @@ export async function createCourse(input: {
             input.term,
             normalizeFolder(input.folder),
             input.color ?? null,
-            now(),
+            t,
         ],
+    );
+    // A course is also a category (migration 0012 did this for existing rows).
+    await getDb().execute(
+        `INSERT OR IGNORE INTO categories (id, name, color, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?)`,
+        [newId("cat"), input.code, input.color ?? null, t, t],
+    );
+    await getDb().execute(
+        "UPDATE courses SET category_id = (SELECT id FROM categories WHERE name = ?) WHERE id = ?",
+        [input.code, id],
     );
     const rows = await getDb().select("SELECT * FROM courses WHERE id = ?", [id]);
     return courseSchema.parse(rows[0]);

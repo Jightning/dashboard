@@ -193,7 +193,7 @@ describe("notes + FTS5", () => {
     it("lists notes scoped to a folder without body content", async () => {
         await notes.createNote({ title: "a", folder: "/school/ece" });
         await notes.createNote({ title: "b", folder: "/personal" });
-        const inSchool = await notes.listNotes("/school");
+        const inSchool = await notes.listNotes({ folder: "/school" });
         expect(inSchool).toHaveLength(1);
         expect(inSchool[0]?.title).toBe("a");
         expect("body_md" in inSchool[0]!).toBe(false);

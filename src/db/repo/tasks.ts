@@ -7,6 +7,7 @@ export interface TaskInput {
     title: string;
     notes?: string | null;
     courseId?: string | null;
+    categoryId?: string | null;
     dueAt?: number | null;
     recurrence?: Recurrence | null;
 }
@@ -17,14 +18,15 @@ export async function createTask(input: TaskInput): Promise<Task> {
     const id = newId("tsk");
     const t = now();
     await getDb().execute(
-        `INSERT INTO tasks (id, title, notes, course_id, due_at, recurrence,
+        `INSERT INTO tasks (id, title, notes, course_id, category_id, due_at, recurrence,
                             completed_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
         [
             id,
             input.title,
             input.notes ?? null,
             input.courseId ?? null,
+            input.categoryId ?? null,
             input.dueAt ?? null,
             input.recurrence ?? null,
             t,
@@ -38,13 +40,14 @@ export async function updateTask(id: string, input: TaskInput): Promise<Task> {
     if (input.recurrence && input.dueAt == null)
         throw new Error("a recurring task needs a due date to recur from");
     const res = await getDb().execute(
-        `UPDATE tasks SET title = ?, notes = ?, course_id = ?, due_at = ?,
+        `UPDATE tasks SET title = ?, notes = ?, course_id = ?, category_id = ?, due_at = ?,
                           recurrence = ?, updated_at = ?
          WHERE id = ?`,
         [
             input.title,
             input.notes ?? null,
             input.courseId ?? null,
+            input.categoryId ?? null,
             input.dueAt ?? null,
             input.recurrence ?? null,
             now(),
@@ -67,6 +70,7 @@ export async function completeTask(id: string): Promise<Task | null> {
         title: task.title,
         notes: task.notes,
         courseId: task.course_id,
+        categoryId: task.category_id,
         dueAt: nextDueDate(task.due_at, task.recurrence),
         recurrence: task.recurrence,
     });
@@ -90,19 +94,23 @@ export async function getTask(id: string): Promise<Task> {
 }
 
 export async function listOpenTasks(
-    opts: { dueBefore?: number } = {},
+    opts: { dueBefore?: number; categoryId?: string } = {},
 ): Promise<Task[]> {
-    const rows = opts.dueBefore
-        ? await getDb().select(
-              `SELECT * FROM tasks
-               WHERE completed_at IS NULL AND due_at IS NOT NULL AND due_at <= ?
-               ORDER BY due_at ASC`,
-              [opts.dueBefore],
-          )
-        : await getDb().select(
-              `SELECT * FROM tasks WHERE completed_at IS NULL
-               ORDER BY due_at IS NULL, due_at ASC, created_at ASC`,
-          );
+    const where = ["completed_at IS NULL"];
+    const params: unknown[] = [];
+    if (opts.dueBefore !== undefined) {
+        where.push("due_at IS NOT NULL AND due_at <= ?");
+        params.push(opts.dueBefore);
+    }
+    if (opts.categoryId !== undefined) {
+        where.push("category_id = ?");
+        params.push(opts.categoryId);
+    }
+    const rows = await getDb().select(
+        `SELECT * FROM tasks WHERE ${where.join(" AND ")}
+         ORDER BY due_at IS NULL, due_at ASC, created_at ASC`,
+        params,
+    );
     return rows.map((r) => taskSchema.parse(r));
 }
 

@@ -1,6 +1,7 @@
 import { getDb } from "../client";
 import { newId, now } from "@/lib/ids";
 import { chatMessageSchema, type ChatMessage } from "@/lib/schemas";
+import { toFtsQuery } from "./documents";
 
 export interface MessageUsage {
     inputTokens?: number;
@@ -35,6 +36,13 @@ export async function insertMessage(opts: {
             now(),
         ],
     );
+    const content = extractTextParts(opts.partsJson);
+    if (content) {
+        await getDb().execute(
+            "INSERT INTO messages_fts (message_id, session_id, content) VALUES (?, ?, ?)",
+            [id, opts.sessionId, content],
+        );
+    }
     return id;
 }
 
@@ -100,4 +108,31 @@ export async function sessionUsageTotals(
         outputTokens: r?.output_tokens ?? 0,
         cachedInputTokens: r?.cached_input_tokens ?? 0,
     };
+}
+
+/** Concatenated text parts of a parts_json array; "" when malformed. */
+export function extractTextParts(partsJson: string): string {
+    try {
+        const parts = JSON.parse(partsJson) as Array<{
+            type?: string;
+            text?: string;
+        }>;
+        return parts
+            .filter((p) => p.type === "text" && typeof p.text === "string")
+            .map((p) => p.text)
+            .join("\n");
+    } catch {
+        return "";
+    }
+}
+
+/** Session ids with any message matching the query, newest activity first. */
+export async function searchSessionIds(query: string): Promise<string[]> {
+    const fts = toFtsQuery(query);
+    if (!fts) return [];
+    const rows = await getDb().select<{ session_id: string }>(
+        "SELECT DISTINCT session_id FROM messages_fts WHERE messages_fts MATCH ?",
+        [fts],
+    );
+    return rows.map((r) => r.session_id);
 }

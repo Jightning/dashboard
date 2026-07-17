@@ -109,7 +109,7 @@ export function createNoteTools(permissions: PermissionContext) {
                 "list_notes",
                 noteScopeResolvers.list_notes!,
                 async ({ folder }: z.infer<typeof listInput>) => {
-                    const notes = await listNotes(folder);
+                    const notes = await listNotes(folder ? { folder } : undefined);
                     return notes.map((n) => ({
                         id: n.id,
                         title: n.title,

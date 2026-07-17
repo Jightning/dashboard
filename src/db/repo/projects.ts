@@ -6,15 +6,16 @@ export async function createProject(input: {
     name: string;
     description?: string | null;
     color?: string | null;
+    categoryId?: string | null;
 }): Promise<Project> {
     const name = input.name.trim();
     if (!name) throw new Error("project needs a name");
     const id = newId("prj");
     const t = now();
     await getDb().execute(
-        `INSERT INTO projects (id, name, description, color, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [id, name, input.description ?? null, input.color ?? null, t, t],
+        `INSERT INTO projects (id, name, description, color, category_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [id, name, input.description ?? null, input.color ?? null, input.categoryId ?? null, t, t],
     );
     return getProject(id);
 }
@@ -25,11 +26,28 @@ export async function getProject(id: string): Promise<Project> {
     return projectSchema.parse(rows[0]);
 }
 
-export async function listProjects(): Promise<Project[]> {
-    const rows = await getDb().select(
-        "SELECT * FROM projects ORDER BY updated_at DESC",
-    );
+export async function listProjects(filter?: {
+    categoryId?: string;
+}): Promise<Project[]> {
+    const rows = filter?.categoryId
+        ? await getDb().select(
+              "SELECT * FROM projects WHERE category_id = ? ORDER BY updated_at DESC",
+              [filter.categoryId],
+          )
+        : await getDb().select(
+              "SELECT * FROM projects ORDER BY updated_at DESC",
+          );
     return rows.map((r) => projectSchema.parse(r));
+}
+
+export async function setProjectCategory(
+    id: string,
+    categoryId: string | null,
+): Promise<void> {
+    await getDb().execute(
+        "UPDATE projects SET category_id = ?, updated_at = ? WHERE id = ?",
+        [categoryId, now(), id],
+    );
 }
 
 export async function updateProject(

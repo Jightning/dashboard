@@ -4,6 +4,7 @@ import { createWebDbClient } from "@/db/webClient";
 import { seedBuiltinLevels } from "@/db/repo/permissions";
 import { seedBuiltinAgents } from "@/db/repo/agents";
 import { seedBuiltinPresets } from "@/db/repo/presets";
+import { extractTextParts } from "@/db/repo/messages";
 import {
     createTauriSettingsStore,
     createLocalStorageSettingsStore,
@@ -52,6 +53,27 @@ async function runBootstrap(): Promise<BootResult> {
         model: settings.defaultModel,
         routerModel: settings.routerModel,
     });
+
+    // One-time backfill: messages written before migration 0012 have no FTS
+    // rows. Cheap no-op on every later boot (count returns > 0).
+    const ftsRows = await db.select<{ n: number }>(
+        "SELECT COUNT(*) AS n FROM messages_fts",
+    );
+    if ((ftsRows[0]?.n ?? 0) === 0) {
+        const msgs = await db.select<{
+            id: string;
+            session_id: string;
+            parts_json: string;
+        }>("SELECT id, session_id, parts_json FROM chat_messages");
+        for (const m of msgs) {
+            const content = extractTextParts(m.parts_json);
+            if (content)
+                await db.execute(
+                    "INSERT INTO messages_fts (message_id, session_id, content) VALUES (?, ?, ?)",
+                    [m.id, m.session_id, content],
+                );
+        }
+    }
 
     void import("@/lib/backup").then(({ runDailyBackup }) =>
         runDailyBackup().catch((e) => console.error("daily backup failed:", e)),
