@@ -20,7 +20,7 @@ import type { NoteSearchHit } from "@/db/repo/notes";
 
 const NAV: { target: NavTarget; label: string }[] = [
     { target: { page: "home" }, label: "Home" },
-    { target: { page: "projects" }, label: "Projects" },
+    { target: { page: "categories" }, label: "Categories" },
     { target: { page: "agents", tab: "chat" }, label: "Chat" },
     { target: { page: "agents", tab: "roster" }, label: "Agent roster" },
     { target: { page: "agents", tab: "pipelines" }, label: "Pipelines" },

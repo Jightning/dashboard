@@ -1,12 +1,12 @@
 import {
     CalendarCheck,
-    FolderKanban,
     LayoutDashboard,
     Network,
     NotebookPen,
     Settings,
     Shield,
     SlidersHorizontal,
+    Tags,
 } from "lucide-react";
 import { motion } from "motion/react";
 import { cn } from "@/lib/utils";
@@ -14,7 +14,7 @@ import { cn } from "@/lib/utils";
 export type Page =
     | "home"
     | "agents"
-    | "projects"
+    | "categories"
     | "notes"
     | "planner"
     | "presets"
@@ -44,7 +44,7 @@ const SECTIONS: { heading: string; items: NavItem[] }[] = [
     {
         heading: "Workspace",
         items: [
-            { page: "projects", label: "Projects", icon: FolderKanban },
+            { page: "categories", label: "Categories", icon: Tags },
             { page: "notes", label: "Notes", icon: NotebookPen },
             { page: "planner", label: "Planner", icon: CalendarCheck },
         ],

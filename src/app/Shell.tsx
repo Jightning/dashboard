@@ -5,7 +5,7 @@ import { HomePage } from "./home/HomePage";
 import { AgentsPage } from "./agents/AgentsPage";
 import { NotesPage } from "./notes/NotesPage";
 import { PlannerPage } from "./planner/PlannerPage";
-import { ProjectsPage } from "./projects/ProjectsPage";
+import { CategoriesPage } from "./categories/CategoriesPage";
 import { SettingsPage } from "./settings/SettingsPage";
 import { PresetsPage } from "./presets/PresetsPage";
 import { PermissionsPage } from "./permissions/PermissionsPage";
@@ -19,7 +19,7 @@ const PAGES: Record<Page, () => React.JSX.Element> = {
     agents: AgentsPage,
     // Needs props, so it's special-cased in the render; this entry only
     // satisfies the Record type.
-    projects: () => <></>,
+    categories: () => <></>,
     notes: NotesPage,
     planner: PlannerPage,
     presets: PresetsPage,
@@ -58,8 +58,8 @@ export function Shell() {
                                     tab={nav.tab}
                                     sessionId={nav.sessionId}
                                 />
-                            ) : nav.page === "projects" ? (
-                                <ProjectsPage onNavigate={setNav} />
+                            ) : nav.page === "categories" ? (
+                                <CategoriesPage onNavigate={setNav} />
                             ) : nav.page === "notes" ? (
                                 <NotesPage tab={nav.tab} />
                             ) : nav.page === "planner" ? (
