@@ -8,8 +8,8 @@ import { ReviewTab } from "./ReviewTab";
 
 type PlannerTab = "tasks" | "calendar" | "applications" | "review";
 const TABS: { id: PlannerTab; label: string }[] = [
-    { id: "tasks", label: "Tasks" },
     { id: "calendar", label: "Calendar" },
+    { id: "tasks", label: "Tasks" },
     { id: "applications", label: "Applications" },
     { id: "review", label: "Review" },
 ];
@@ -17,7 +17,7 @@ const isTab = (t: string | undefined): t is PlannerTab =>
     TABS.some((x) => x.id === t);
 
 export function PlannerPage({ tab }: { tab?: string } = {}) {
-    const [active, setActive] = useState<PlannerTab>(isTab(tab) ? tab : "tasks");
+    const [active, setActive] = useState<PlannerTab>(isTab(tab) ? tab : "calendar");
     useEffect(() => {
         if (isTab(tab)) setActive(tab);
     }, [tab]);
@@ -39,7 +39,9 @@ export function PlannerPage({ tab }: { tab?: string } = {}) {
             <div
                 className={cn(
                     "mx-auto mt-6 flex flex-col gap-6",
-                    active === "applications" ? "max-w-6xl" : "max-w-3xl",
+                    active === "applications" || active === "calendar"
+                        ? "max-w-6xl"
+                        : "max-w-3xl",
                 )}
             >
                 {active === "tasks" && <TasksTab />}

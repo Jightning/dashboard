@@ -1,24 +1,53 @@
-import { useCallback, useEffect, useState } from "react";
-import { Upload, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { ChevronLeft, ChevronRight, Upload, Trash2 } from "lucide-react";
 import * as coursesRepo from "@/db/repo/courses";
-import { listEventsBetween } from "@/db/repo/events";
+import * as categoriesRepo from "@/db/repo/categories";
 import { importClassSchedule } from "@/lib/ics";
+import { collectCalendarItems, type CalendarItem } from "./calendarItems";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import type { CalendarEvent, Course } from "@/lib/schemas";
+import { FilterChips } from "@/components/ui/filterChips";
+import { cn } from "@/lib/utils";
+import type { Category, Course } from "@/lib/schemas";
 
 const DAY = 86_400_000;
+type ViewMode = "7d" | "14d" | "month";
+
+function startOfDay(t: number): number {
+    const d = new Date(t);
+    d.setHours(0, 0, 0, 0);
+    return d.getTime();
+}
+
+/** [rangeStart, rangeEnd) for the mode, anchored at `anchor`. */
+function rangeFor(mode: ViewMode, anchor: number): { from: number; to: number } {
+    if (mode === "month") {
+        const d = new Date(anchor);
+        const first = new Date(d.getFullYear(), d.getMonth(), 1).getTime();
+        const gridStart = startOfDay(first - new Date(first).getDay() * DAY);
+        return { from: gridStart, to: gridStart + 42 * DAY };
+    }
+    const from = startOfDay(anchor);
+    return { from, to: from + (mode === "7d" ? 7 : 14) * DAY };
+}
 
 export function CalendarTab() {
+    const [mode, setMode] = useState<ViewMode>("7d");
+    const [anchor, setAnchor] = useState(() => Date.now());
+    const [items, setItems] = useState<CalendarItem[]>([]);
     const [courses, setCourses] = useState<Course[]>([]);
-    const [events, setEvents] = useState<CalendarEvent[]>([]);
+    const [categories, setCategories] = useState<Category[]>([]);
+    const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
 
+    const { from, to } = useMemo(() => rangeFor(mode, anchor), [mode, anchor]);
+
     const reload = useCallback(async () => {
+        setItems(await collectCalendarItems(from, to));
         setCourses(await coursesRepo.listCourses());
-        setEvents(await listEventsBetween(Date.now(), Date.now() + 7 * DAY));
-    }, []);
+        setCategories(await categoriesRepo.listCategories());
+    }, [from, to]);
     useEffect(() => {
         void reload();
     }, [reload]);
@@ -33,59 +62,209 @@ export function CalendarTab() {
         }
     };
 
+    const visible = categoryFilter
+        ? items.filter((i) => i.categoryId === categoryFilter)
+        : items;
+
+    const step = mode === "month" ? 30 * DAY : (mode === "7d" ? 7 : 14) * DAY;
+
     return (
-        <div className="flex flex-col gap-6">
+        <div className="flex flex-col gap-4">
             {error && <p className="text-xs text-destructive">{error}</p>}
-            <WeekEvents events={events} courses={courses} />
+            <div className="flex flex-wrap items-center gap-2">
+                <div className="flex rounded-md border border-border">
+                    {(["7d", "14d", "month"] as const).map((m) => (
+                        <button
+                            key={m}
+                            onClick={() => setMode(m)}
+                            className={cn(
+                                "cursor-pointer px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider",
+                                mode === m
+                                    ? "bg-primary/15 text-primary"
+                                    : "text-muted-foreground hover:text-foreground",
+                            )}
+                        >
+                            {m === "month" ? "1 month" : `${m.slice(0, -1)} days`}
+                        </button>
+                    ))}
+                </div>
+                <Button
+                    variant="ghost"
+                    size="icon"
+                    aria-label="Earlier"
+                    onClick={() => setAnchor((a) => a - step)}
+                >
+                    <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <Button
+                    variant="ghost"
+                    size="icon"
+                    aria-label="Later"
+                    onClick={() => setAnchor((a) => a + step)}
+                >
+                    <ChevronRight className="h-4 w-4" />
+                </Button>
+                <button
+                    className="cursor-pointer font-mono text-[10px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
+                    onClick={() => setAnchor(Date.now())}
+                >
+                    today
+                </button>
+                <span className="ml-auto font-mono text-xs text-muted-foreground">
+                    {new Date(from).toLocaleDateString(undefined, {
+                        month: "short",
+                        day: "numeric",
+                    })}{" "}
+                    –{" "}
+                    {new Date(to - 1).toLocaleDateString(undefined, {
+                        month: "short",
+                        day: "numeric",
+                    })}
+                </span>
+            </div>
+            <FilterChips
+                options={categories.map((c) => ({
+                    id: c.id,
+                    label: c.name,
+                    color: c.color ?? undefined,
+                }))}
+                active={categoryFilter}
+                onChange={setCategoryFilter}
+            />
+            {mode === "month" ? (
+                <MonthGrid from={from} items={visible} anchor={anchor} />
+            ) : (
+                <DayList from={from} days={mode === "7d" ? 7 : 14} items={visible} />
+            )}
             <CoursesPanel courses={courses} act={act} reload={reload} />
         </div>
     );
 }
 
-function WeekEvents({
-    events,
-    courses,
-}: {
-    events: CalendarEvent[];
-    courses: Course[];
-}) {
-    const color = (id: string | null) =>
-        courses.find((c) => c.id === id)?.color ?? "var(--primary)";
+function ItemChip({ item, showTime }: { item: CalendarItem; showTime: boolean }) {
     return (
-        <Card>
-            <CardHeader>
-                <CardTitle>Next 7 days</CardTitle>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-1.5">
-                {events.length === 0 && (
-                    <p className="text-xs text-muted-foreground">
-                        No events this week. Import a schedule below.
-                    </p>
+        <div
+            className="flex min-w-0 items-center gap-1.5 rounded-sm px-1.5 py-0.5 text-xs"
+            style={{ background: `color-mix(in oklab, ${item.color} 12%, transparent)` }}
+            title={item.detail ?? item.title}
+        >
+            <span
+                aria-hidden
+                className={cn(
+                    "h-1.5 w-1.5 shrink-0 rounded-full",
+                    item.kind === "task" && "rounded-[2px]",
                 )}
-                {events.map((e) => (
-                    <div key={e.id} className="flex items-center gap-2 text-sm">
-                        <span
-                            aria-hidden
-                            className="h-2 w-2 rounded-full"
-                            style={{ background: color(e.course_id) }}
-                        />
-                        <span className="w-40 font-mono text-xs text-muted-foreground">
-                            {new Date(e.starts_at).toLocaleString(undefined, {
+                style={{ background: item.color }}
+            />
+            {showTime && (
+                <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
+                    {new Date(item.at).toLocaleTimeString(undefined, {
+                        hour: "numeric",
+                        minute: "2-digit",
+                    })}
+                </span>
+            )}
+            <span className="truncate">{item.title}</span>
+        </div>
+    );
+}
+
+function DayList({
+    from,
+    days,
+    items,
+}: {
+    from: number;
+    days: number;
+    items: CalendarItem[];
+}) {
+    const today = startOfDay(Date.now());
+    return (
+        <div className="flex flex-col gap-1">
+            {Array.from({ length: days }, (_, i) => {
+                const dayStart = from + i * DAY;
+                const dayItems = items.filter(
+                    (x) => x.at >= dayStart && x.at < dayStart + DAY,
+                );
+                return (
+                    <div
+                        key={dayStart}
+                        className={cn(
+                            "flex gap-3 rounded-md border border-border/60 px-3 py-1.5",
+                            dayStart === today && "border-primary/40 bg-primary/5",
+                        )}
+                    >
+                        <span className="w-20 shrink-0 pt-0.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                            {new Date(dayStart).toLocaleDateString(undefined, {
                                 weekday: "short",
-                                hour: "numeric",
-                                minute: "2-digit",
+                                month: "short",
+                                day: "numeric",
                             })}
                         </span>
-                        <span className="flex-1">{e.title}</span>
-                        {e.location && (
-                            <span className="font-mono text-xs text-muted-foreground">
-                                {e.location}
+                        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                            {dayItems.length === 0 ? (
+                                <span className="text-xs text-muted-foreground/50">—</span>
+                            ) : (
+                                dayItems.map((x) => (
+                                    <ItemChip key={x.id} item={x} showTime />
+                                ))
+                            )}
+                        </div>
+                    </div>
+                );
+            })}
+        </div>
+    );
+}
+
+function MonthGrid({
+    from,
+    items,
+    anchor,
+}: {
+    from: number;
+    items: CalendarItem[];
+    anchor: number;
+}) {
+    const today = startOfDay(Date.now());
+    const month = new Date(anchor).getMonth();
+    return (
+        <div className="grid grid-cols-7 gap-px overflow-hidden rounded-md border border-border bg-border">
+            {Array.from({ length: 42 }, (_, i) => {
+                const dayStart = from + i * DAY;
+                const d = new Date(dayStart);
+                const dayItems = items.filter(
+                    (x) => x.at >= dayStart && x.at < dayStart + DAY,
+                );
+                return (
+                    <div
+                        key={dayStart}
+                        className={cn(
+                            "flex min-h-20 flex-col gap-0.5 bg-background p-1",
+                            d.getMonth() !== month && "opacity-45",
+                            dayStart === today && "bg-primary/5",
+                        )}
+                    >
+                        <span
+                            className={cn(
+                                "font-mono text-[10px] text-muted-foreground",
+                                dayStart === today && "text-primary",
+                            )}
+                        >
+                            {d.getDate()}
+                        </span>
+                        {dayItems.slice(0, 3).map((x) => (
+                            <ItemChip key={x.id} item={x} showTime={false} />
+                        ))}
+                        {dayItems.length > 3 && (
+                            <span className="font-mono text-[9px] text-muted-foreground">
+                                +{dayItems.length - 3} more
                             </span>
                         )}
                     </div>
-                ))}
-            </CardContent>
-        </Card>
+                );
+            })}
+        </div>
     );
 }
 
