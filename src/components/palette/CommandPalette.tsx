@@ -31,7 +31,7 @@ const NAV: { target: NavTarget; label: string }[] = [
     { target: { page: "planner", tab: "tasks" }, label: "Tasks" },
     { target: { page: "planner", tab: "calendar" }, label: "Calendar" },
     { target: { page: "planner", tab: "applications" }, label: "Applications" },
-    { target: { page: "planner", tab: "review" }, label: "Review" },
+    { target: { page: "notes", tab: "review" }, label: "Review flashcards" },
     { target: { page: "presets" }, label: "Presets" },
     { target: { page: "permissions" }, label: "Permissions" },
     { target: { page: "settings" }, label: "Settings" },

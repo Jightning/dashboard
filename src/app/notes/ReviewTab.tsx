@@ -78,7 +78,7 @@ export function ReviewTab() {
                         Queue clear.{" "}
                         {reviewed > 0
                             ? `${reviewed} reviewed this session.`
-                            : "Ask an agent to make cards from your lecture notes."}
+                            : "No cards are due. Open a note and press “Make flashcards”, or ask an agent to make cards from your notes."}
                     </p>
                 </Card>
             ) : (

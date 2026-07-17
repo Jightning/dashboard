@@ -4,14 +4,12 @@ import { TabBar } from "@/components/ui/tabs";
 import { TasksTab } from "./TasksTab";
 import { CalendarTab } from "./CalendarTab";
 import { ApplicationsTab } from "./ApplicationsTab";
-import { ReviewTab } from "./ReviewTab";
 
-type PlannerTab = "tasks" | "calendar" | "applications" | "review";
+type PlannerTab = "tasks" | "calendar" | "applications";
 const TABS: { id: PlannerTab; label: string }[] = [
     { id: "calendar", label: "Calendar" },
     { id: "tasks", label: "Tasks" },
     { id: "applications", label: "Applications" },
-    { id: "review", label: "Review" },
 ];
 const isTab = (t: string | undefined): t is PlannerTab =>
     TABS.some((x) => x.id === t);
@@ -30,7 +28,7 @@ export function PlannerPage({ tab }: { tab?: string } = {}) {
                         Planner
                     </h1>
                     <p className="mt-1 text-sm text-muted-foreground">
-                        Deadlines, schedules, applications, and reviews — one
+                        Deadlines, schedules, and applications — one
                         ephemeris for everything time-shaped.
                     </p>
                 </header>
@@ -47,7 +45,6 @@ export function PlannerPage({ tab }: { tab?: string } = {}) {
                 {active === "tasks" && <TasksTab />}
                 {active === "calendar" && <CalendarTab />}
                 {active === "applications" && <ApplicationsTab />}
-                {active === "review" && <ReviewTab />}
             </div>
         </div>
     );
