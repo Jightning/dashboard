@@ -1,38 +1,38 @@
 import { useCallback, useEffect, useState } from "react";
 import { Check, Plus, Trash2 } from "lucide-react";
 import * as tasksRepo from "@/db/repo/tasks";
-import * as coursesRepo from "@/db/repo/courses";
+import * as categoriesRepo from "@/db/repo/categories";
 import type { Recurrence } from "@/lib/recurrence";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { FilterChips } from "@/components/ui/filterChips";
-import type { Course, Task } from "@/lib/schemas";
+import type { Category, Task } from "@/lib/schemas";
 
 const DAY = 86_400_000;
 
 export function TasksTab() {
     const [tasks, setTasks] = useState<Task[]>([]);
-    const [courses, setCourses] = useState<Course[]>([]);
+    const [categories, setCategories] = useState<Category[]>([]);
     const [error, setError] = useState<string | null>(null);
-    const [courseFilter, setCourseFilter] = useState<string | null>(null);
+    const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
 
     const reload = useCallback(async () => {
         setTasks(await tasksRepo.listOpenTasks());
-        setCourses(await coursesRepo.listCourses());
+        setCategories(await categoriesRepo.listCategories());
     }, []);
     useEffect(() => {
         void reload();
     }, [reload]);
 
-    // If the course backing the active filter chip gets deleted, fall back
+    // If the category backing the active filter chip gets deleted, fall back
     // to "All" instead of silently showing an empty task list.
     useEffect(() => {
-        if (courseFilter && !courses.some((c) => c.id === courseFilter)) {
-            setCourseFilter(null);
+        if (categoryFilter && !categories.some((c) => c.id === categoryFilter)) {
+            setCategoryFilter(null);
         }
-    }, [courses, courseFilter]);
+    }, [categories, categoryFilter]);
 
     const act = async (fn: () => Promise<unknown>) => {
         setError(null);
@@ -47,19 +47,27 @@ export function TasksTab() {
     return (
         <div className="flex flex-col gap-6">
             {error && <p className="text-xs text-destructive">{error}</p>}
-            <QuickAdd courses={courses} onAdd={(input) => act(() => tasksRepo.createTask(input))} />
+            <QuickAdd
+                categories={categories}
+                onAdd={(input) => act(() => tasksRepo.createTask(input))}
+                onCreateCategory={async (name) => {
+                    const c = await categoriesRepo.createCategory({ name });
+                    await reload();
+                    return c.id;
+                }}
+            />
             <FilterChips
-                options={courses.map((c) => ({
+                options={categories.map((c) => ({
                     id: c.id,
-                    label: c.code,
+                    label: c.name,
                     color: c.color ?? undefined,
                 }))}
-                active={courseFilter}
-                onChange={setCourseFilter}
+                active={categoryFilter}
+                onChange={setCategoryFilter}
             />
             <TaskList
-                tasks={courseFilter ? tasks.filter((t) => t.course_id === courseFilter) : tasks}
-                courses={courses}
+                tasks={categoryFilter ? tasks.filter((t) => t.category_id === categoryFilter) : tasks}
+                categories={categories}
                 act={act}
             />
         </div>
@@ -67,15 +75,19 @@ export function TasksTab() {
 }
 
 function QuickAdd({
-    courses,
+    categories,
     onAdd,
+    onCreateCategory,
 }: {
-    courses: Course[];
+    categories: Category[];
     onAdd: (input: tasksRepo.TaskInput) => Promise<void>;
+    onCreateCategory: (name: string) => Promise<string>;
 }) {
     const [title, setTitle] = useState("");
     const [due, setDue] = useState("");
-    const [courseId, setCourseId] = useState("");
+    const [categoryId, setCategoryId] = useState("");
+    const [creating, setCreating] = useState(false);
+    const [newCategory, setNewCategory] = useState("");
     const [recurrence, setRecurrence] = useState("");
     const [submitting, setSubmitting] = useState(false);
 
@@ -85,7 +97,7 @@ function QuickAdd({
         try {
             await onAdd({
                 title: title.trim(),
-                courseId: courseId || null,
+                categoryId: categoryId || null,
                 dueAt: due ? new Date(due).getTime() : null,
                 recurrence: (recurrence || null) as Recurrence | null,
             });
@@ -119,22 +131,42 @@ function QuickAdd({
                     onChange={(e) => setDue(e.target.value)}
                 />
             </label>
-            {courses.length > 0 && (
-                <label className="flex w-32 flex-col gap-1 text-sm">
-                    Course
+            <label className="flex w-36 flex-col gap-1 text-sm">
+                Category
+                {creating ? (
+                    <Input
+                        autoFocus
+                        value={newCategory}
+                        placeholder="name…"
+                        onChange={(e) => setNewCategory(e.target.value)}
+                        onKeyDown={(e) => {
+                            if (e.key === "Enter" && newCategory.trim())
+                                void onCreateCategory(newCategory).then((id) => {
+                                    setCategoryId(id);
+                                    setCreating(false);
+                                    setNewCategory("");
+                                });
+                            if (e.key === "Escape") setCreating(false);
+                        }}
+                    />
+                ) : (
                     <Select
-                        value={courseId}
-                        onChange={(e) => setCourseId(e.target.value)}
+                        value={categoryId}
+                        onChange={(e) => {
+                            if (e.target.value === "__new") setCreating(true);
+                            else setCategoryId(e.target.value);
+                        }}
                     >
                         <option value="">—</option>
-                        {courses.map((c) => (
+                        {categories.map((c) => (
                             <option key={c.id} value={c.id}>
-                                {c.code}
+                                {c.name}
                             </option>
                         ))}
+                        <option value="__new">+ new category…</option>
                     </Select>
-                </label>
-            )}
+                )}
+            </label>
             <label className="flex w-28 flex-col gap-1 text-sm">
                 Repeat
                 <Select
@@ -167,15 +199,15 @@ function dueTone(dueAt: number | null): "neutral" | "warning" | "destructive" {
 
 function TaskList({
     tasks,
-    courses,
+    categories,
     act,
 }: {
     tasks: Task[];
-    courses: Course[];
+    categories: Category[];
     act: (fn: () => Promise<unknown>) => Promise<void>;
 }) {
-    const courseCode = (id: string | null) =>
-        courses.find((c) => c.id === id)?.code;
+    const categoryOf = (id: string | null) =>
+        categories.find((c) => c.id === id);
     if (tasks.length === 0)
         return (
             <p className="text-sm text-muted-foreground">
@@ -198,8 +230,18 @@ function TaskList({
                         <Check className="h-4 w-4" />
                     </Button>
                     <span className="flex-1 text-sm">{t.title}</span>
-                    {courseCode(t.course_id) && (
-                        <Badge>{courseCode(t.course_id)}</Badge>
+                    {categoryOf(t.category_id) && (
+                        <Badge>
+                            <span
+                                aria-hidden
+                                className="mr-1 inline-block h-1.5 w-1.5 rounded-full"
+                                style={{
+                                    background:
+                                        categoryOf(t.category_id)!.color ?? "var(--primary)",
+                                }}
+                            />
+                            {categoryOf(t.category_id)!.name}
+                        </Badge>
                     )}
                     {t.recurrence && <Badge tone="primary">{t.recurrence}</Badge>}
                     {t.due_at !== null && (
