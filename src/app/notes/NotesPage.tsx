@@ -312,6 +312,22 @@ function NoteEditor({
         null,
     );
     const [cardsMsg, setCardsMsg] = useState<string | null>(null);
+    // Mirrors `permissions` so the unmount cleanup below can reach the live
+    // broker without depending on state (effects don't see fresh state after
+    // the component that set it is gone).
+    const permsRef = useRef<PermissionContext | null>(null);
+
+    useEffect(
+        () => () => {
+            // Switching notes remounts this component (key={draft.id}) while
+            // a generation is in flight: ApprovalCards unsubscribes and the
+            // user can never respond, which would otherwise hang
+            // generateFlashcardsFromNote's promise forever. Deny everything
+            // outstanding so it settles down the denied path instead.
+            permsRef.current?.broker.denyAll();
+        },
+        [],
+    );
 
     const html = useMemo(
         () => marked.parse(draft.body_md || "*Nothing here yet.*") as string,
@@ -360,6 +376,7 @@ function NoteEditor({
                     onClick={() => {
                         if (!draft) return;
                         const perms = new PermissionContext();
+                        permsRef.current = perms;
                         setPermissions(perms);
                         setCardsMsg(null);
                         void generateFlashcardsFromNote({
@@ -379,6 +396,7 @@ function NoteEditor({
                             )
                             .finally(() => {
                                 perms.broker.denyAll();
+                                permsRef.current = null;
                                 setPermissions(null);
                             });
                     }}
