@@ -11,6 +11,8 @@ import {
 import type { NetworkEdge, NetworkNode } from "./networkData";
 
 const RADIUS = 40; // sphere radius in the 0–100 viewBox
+const EXO_REVEAL_START = 0.95; // exo starts fading in below this zoom
+const EXO_REVEAL_FULL = 0.7; // fully visible at or below this zoom
 const SPIN = 0.12; // idle spin (rad/s)
 const IDLE_MS = 3000; // resume auto-spin after this long without interaction
 const SENS = 0.01; // drag sensitivity (rad per px)
@@ -109,6 +111,15 @@ export function NetworkSphere({
             const hoveredRoot =
                 hov && byId.has(hov) ? roots[byId.get(hov)!]! : null;
 
+            const zoom = zoomRef.current;
+            const reveal = Math.min(
+                1,
+                Math.max(
+                    0,
+                    (EXO_REVEAL_START - zoom) / (EXO_REVEAL_START - EXO_REVEAL_FULL),
+                ),
+            );
+
             const proj: { cx: number; cy: number; depth: number }[] = [];
             for (let i = 0; i < nodes.length; i++) {
                 const node = nodes[i]!;
@@ -125,7 +136,7 @@ export function NetworkSphere({
                 if (node.kind === "tool") op *= 0.8;
                 if (dim) op *= 0.22;
                 else if (hoveredRoot && focus) op = Math.min(1, op * 1.4);
-                if ((node.shell ?? 1) > 1) op *= 0.6;
+                if ((node.shell ?? 1) > 1) op *= 0.6 * reveal;
 
                 const rScale =
                     (0.6 + 0.4 * p.depth) * (hoveredRoot && focus ? 1.15 : 1);
@@ -152,14 +163,19 @@ export function NetworkSphere({
                     hit.setAttribute("cx", String(p.cx));
                     hit.setAttribute("cy", String(p.cy));
                     hit.setAttribute("r", String(node.r * 2 + 3));
-                    // Back-hemisphere nodes shouldn't intercept front clicks.
-                    hit.style.pointerEvents = p.depth > 0.45 ? "auto" : "none";
+                    // Back-hemisphere nodes shouldn't intercept front clicks;
+                    // hidden exo nodes (reveal ~0) shouldn't be hoverable/clickable.
+                    hit.style.pointerEvents =
+                        p.depth > 0.45 && ((node.shell ?? 1) === 1 || reveal > 0.2)
+                            ? "auto"
+                            : "none";
                 }
                 const label = labelEls.current[i];
                 if (label) {
                     let lop = 0;
                     if (node.primary && !dim) lop = 0.5 + 0.5 * p.depth;
                     if (hoveredRoot && focus) lop = 0.92;
+                    if ((node.shell ?? 1) > 1) lop *= reveal;
                     label.setAttribute("x", String(p.cx));
                     label.setAttribute("y", String(p.cy - node.r * rScale - 1.5));
                     label.setAttribute("opacity", String(lop));
@@ -389,7 +405,11 @@ export function NetworkSphere({
                             }}
                             transform={`translate(${seed[i]!.cx} ${seed[i]!.cy}) scale(${n.r * 3.2})`}
                             fill={n.color}
-                            fillOpacity={(0.35 + 0.65 * seed[i]!.depth) * 0.45}
+                            fillOpacity={
+                                (n.shell ?? 1) > 1
+                                    ? 0
+                                    : (0.35 + 0.65 * seed[i]!.depth) * 0.45
+                            }
                         >
                             <path d="M -1 0 L 0 0.07 L 1 0 L 0 -0.07 Z" />
                             <path d="M 0 -1 L 0.07 0 L 0 1 L -0.07 0 Z" />
@@ -408,7 +428,9 @@ export function NetworkSphere({
                         cy={seed[i]!.cy}
                         r={n.r}
                         fill={n.color}
-                        fillOpacity={0.35 + 0.65 * seed[i]!.depth}
+                        fillOpacity={
+                            (n.shell ?? 1) > 1 ? 0 : 0.35 + 0.65 * seed[i]!.depth
+                        }
                         className="pointer-events-none"
                     />
                 ))}

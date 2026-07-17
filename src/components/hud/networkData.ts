@@ -163,7 +163,7 @@ function attachAgent(
 const RELATIVE = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
 /** Human relative time from a unix-seconds timestamp (e.g. "3 minutes ago"). */
 export function relativeTime(ts: number): string {
-    const sec = Math.round((ts * 1000 - Date.now()) / 1000);
+    const sec = Math.round((ts - Date.now()) / 1000);
     const abs = Math.abs(sec);
     if (abs < 60) return RELATIVE.format(Math.round(sec), "second");
     if (abs < 3600) return RELATIVE.format(Math.round(sec / 60), "minute");
@@ -356,7 +356,7 @@ export function buildUniverseNetwork(opts: {
 }
 
 export const CATEGORY_INNER = 8;
-export const EXO_SHELL = 1.4;
+export const EXO_SHELL = 1.75;
 export const UNFILED_ID = "unfiled";
 
 /**

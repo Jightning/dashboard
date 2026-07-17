@@ -350,9 +350,11 @@ export function ChatWorkspace({
                             </button>
                         )}
                         <p className="text-xs text-muted-foreground">
-                            {sessions.length
-                                ? "Hover a node or row to link them · click to open · scroll to zoom."
-                                : "Start a chat from a preset in the sidebar."}
+                            {sphereFocus
+                                ? "Hover to inspect · click to open · scroll out for older chats."
+                                : sessions.length
+                                  ? "Hover a node or row to link them · click to open · scroll to zoom."
+                                  : "Start a chat from a preset in the sidebar."}
                         </p>
                     </div>
                 )}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildCategoryUniverse, buildUniverseNetwork } from "./networkData";
+import { buildCategoryUniverse, buildUniverseNetwork, relativeTime } from "./networkData";
 import type { AgentDef, Category, ChatSession, Preset, Project } from "@/lib/schemas";
 
 function session(id: string, over: Partial<ChatSession> = {}): ChatSession {
@@ -37,6 +37,13 @@ const base = {
     agents: [] as AgentDef[],
     documents: [] as { id: string; title: string; project_id: string | null }[],
 };
+
+describe("relativeTime", () => {
+    it("treats input as milliseconds", () => {
+        expect(relativeTime(Date.now() - 5 * 60_000)).toMatch(/\d+ minutes? ago/);
+        expect(relativeTime(Date.now() - 2 * 86_400_000)).toMatch(/\d+ days? ago/);
+    });
+});
 
 describe("buildUniverseNetwork", () => {
     it("makes one hub per project with doc satellites in its cluster", () => {
