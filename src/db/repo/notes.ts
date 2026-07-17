@@ -34,7 +34,7 @@ export async function getNote(id: string): Promise<Note> {
 
 export async function listNotes(folder?: string): Promise<NoteSummary[]> {
     const sql =
-        "SELECT id, title, folder, created_at, updated_at FROM notes";
+        "SELECT id, title, folder, category_id, created_at, updated_at FROM notes";
     const normalized = folder ? normalizeFolder(folder) : null;
     const scoped =
         normalized !== null && normalized !== "/" ? normalized : null;

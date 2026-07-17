@@ -28,6 +28,15 @@ export const permissionGrantSchema = z.object({
 });
 export type PermissionGrant = z.infer<typeof permissionGrantSchema>;
 
+export const categorySchema = z.object({
+    id: z.string(),
+    name: z.string(),
+    color: z.string().nullable(),
+    created_at: z.number(),
+    updated_at: z.number(),
+});
+export type Category = z.infer<typeof categorySchema>;
+
 export const presetSchema = z.object({
     id: z.string(),
     name: z.string(),
@@ -86,14 +95,26 @@ export function delegationToolName(def: AgentDef): string {
     return `ask_${agentSlug(def.name)}_agent`;
 }
 
+/** Model-generated tags on a chat session; [] when malformed or unset. */
+export function sessionTags(session: ChatSession): string[] {
+    try {
+        return z.array(z.string()).parse(JSON.parse(session.auto_tags_json));
+    } catch {
+        return [];
+    }
+}
+
 export const chatSessionSchema = z.object({
     id: z.string(),
     title: z.string(),
     preset_id: z.string().nullable(),
     permission_level_id: z.string().nullable(),
     project_id: z.string().nullable(),
+    category_id: z.string().nullable(),
     color: z.string().nullable(),
     compaction_summary: z.string().nullable(),
+    auto_summary: z.string().nullable(),
+    auto_tags_json: z.string(),
     created_at: z.number(),
     updated_at: z.number(),
 });
@@ -119,6 +140,7 @@ export const noteSchema = z.object({
     title: z.string(),
     folder: z.string(),
     body_md: z.string(),
+    category_id: z.string().nullable(),
     created_at: z.number(),
     updated_at: z.number(),
 });
@@ -217,6 +239,7 @@ export const courseSchema = z.object({
     term: z.string(),
     folder: z.string(),
     color: z.string().nullable(),
+    category_id: z.string().nullable(),
     created_at: z.number(),
 });
 export type Course = z.infer<typeof courseSchema>;
@@ -228,6 +251,7 @@ export const taskSchema = z.object({
     title: z.string(),
     notes: z.string().nullable(),
     course_id: z.string().nullable(),
+    category_id: z.string().nullable(),
     due_at: z.number().nullable(),
     recurrence: recurrenceSchema.nullable(),
     completed_at: z.number().nullable(),
@@ -324,6 +348,7 @@ export const projectSchema = z.object({
     name: z.string(),
     description: z.string().nullable(),
     color: z.string().nullable(),
+    category_id: z.string().nullable(),
     created_at: z.number(),
     updated_at: z.number(),
 });

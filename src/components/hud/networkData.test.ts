@@ -10,7 +10,10 @@ function session(id: string, over: Partial<ChatSession> = {}): ChatSession {
         permission_level_id: null,
         compaction_summary: null,
         project_id: null,
+        category_id: null,
         color: null,
+        auto_summary: null,
+        auto_tags_json: "[]",
         created_at: 0,
         updated_at: 0,
         ...over,
@@ -23,6 +26,7 @@ function project(id: string, name: string): Project {
         name,
         description: null,
         color: "#22d3ee",
+        category_id: null,
         created_at: 0,
         updated_at: 0,
     };
