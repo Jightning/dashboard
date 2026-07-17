@@ -7,11 +7,62 @@ const fetchInput = z.object({
     url: z.string().describe("Absolute http(s) URL of the page to read"),
 });
 
+const searchInput = z.object({
+    query: z.string().describe("What to search the web for"),
+});
+
 /** Cap fetched page text so a single page can't blow up the context window. */
 export const FETCH_TEXT_LIMIT = 20_000;
 
+export const SEARCH_HOST = "html.duckduckgo.com";
+
+/** One search result parsed out of DuckDuckGo's HTML endpoint. */
+export interface SearchResult {
+    title: string;
+    url: string;
+    snippet: string;
+}
+
+const RESULT_LINK_RE =
+    /class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
+const SNIPPET_RE = /class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g;
+
+function stripTags(html: string): string {
+    return html
+        .replace(/<[^>]+>/g, "")
+        .replace(/&amp;/g, "&")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/\s+/g, " ")
+        .trim();
+}
+
+/** DDG links route through //duckduckgo.com/l/?uddg=<encoded target>. */
+function resolveDdgHref(href: string): string {
+    const m = /[?&]uddg=([^&"]+)/.exec(href);
+    if (m) return decodeURIComponent(m[1]!);
+    return href.startsWith("//") ? `https:${href}` : href;
+}
+
+export function parseDdgResults(html: string, limit = 8): SearchResult[] {
+    const links = [...html.matchAll(RESULT_LINK_RE)];
+    const snippets = [...html.matchAll(SNIPPET_RE)];
+    return links.slice(0, limit).map((m, i) => ({
+        title: stripTags(m[2]!),
+        url: resolveDdgHref(m[1]!.replace(/&amp;/g, "&")),
+        snippet: snippets[i] ? stripTags(snippets[i]![1]!) : "",
+    }));
+}
+
 export const webScopeResolvers: Record<string, ScopeResolver> = {
     fetch_url: (input) => urlScope((input as z.infer<typeof fetchInput>).url),
+    search_web: () => ({
+        access: "read",
+        scopeType: "url_domain",
+        scopeValue: SEARCH_HOST,
+    }),
 };
 
 export function urlScope(url: string): ResolvedScope {
@@ -58,6 +109,29 @@ export function createWebTools(
                     return text.length > FETCH_TEXT_LIMIT
                         ? `${text.slice(0, FETCH_TEXT_LIMIT)}\n[truncated at ${FETCH_TEXT_LIMIT} characters]`
                         : text;
+                },
+            ),
+        }),
+        search_web: tool({
+            description:
+                "Search the web and return result titles, URLs, and snippets. Follow up with fetch_url on the most promising results.",
+            inputSchema: searchInput,
+            execute: permissions.gated(
+                "search_web",
+                webScopeResolvers.search_web!,
+                async ({ query }: z.infer<typeof searchInput>) => {
+                    const res = await fetchImpl(
+                        `https://${SEARCH_HOST}/html/?q=${encodeURIComponent(query)}`,
+                        { headers: { accept: "text/html" } },
+                    );
+                    if (!res.ok)
+                        return `Search failed: HTTP ${res.status} ${res.statusText}`;
+                    const results = parseDdgResults(await res.text());
+                    if (results.length === 0)
+                        return "No results found. Try different keywords.";
+                    return results
+                        .map((r) => `- ${r.title}\n  ${r.url}\n  ${r.snippet}`)
+                        .join("\n");
                 },
             ),
         }),

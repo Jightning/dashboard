@@ -6,6 +6,7 @@ import { createTaskTools } from "./tasks";
 import { createApplicationTools } from "./applications";
 import { createFlashcardTools } from "./flashcards";
 import type { PermissionContext } from "./context";
+import { wrapWebFetch } from "@/ai/providers/appFetch";
 
 /**
  * Every gated tool an agent can be granted, with UI metadata. Adding a tool
@@ -27,6 +28,7 @@ export const TOOL_CATALOG: ToolCatalogEntry[] = [
     { name: "list_notes", label: "List notes", access: "read", group: "notes" },
     { name: "write_note", label: "Create a note", access: "write", group: "notes" },
     { name: "fetch_url", label: "Fetch a web page", access: "read", group: "web" },
+    { name: "search_web", label: "Search the web", access: "read", group: "web" },
     { name: "list_tasks", label: "List open tasks", access: "read", group: "tasks" },
     { name: "create_task", label: "Create a task", access: "write", group: "tasks" },
     { name: "complete_task", label: "Complete a task", access: "write", group: "tasks" },
@@ -48,7 +50,7 @@ export function buildToolSet(
     const all: ToolSet = {
         ...createDocumentTools(deps.permissions),
         ...createNoteTools(deps.permissions),
-        ...createWebTools(deps.permissions, deps.fetch),
+        ...createWebTools(deps.permissions, wrapWebFetch(deps.fetch)),
         ...createTaskTools(deps.permissions),
         ...createApplicationTools(deps.permissions),
         ...createFlashcardTools(deps.permissions),

@@ -1,11 +1,53 @@
 import { defineConfig } from "vitest/config";
+import type { Plugin, Connect } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { fileURLToPath } from "node:url";
 
+// The browser target can't fetch cross-origin (CORS + this server's COEP
+// header). Web tools route through /__proxy?url= instead; the dev server
+// fetches server-side and replies same-origin. Desktop never hits this —
+// plugin-http exits via Rust.
+function corsProxy(): Plugin {
+    const handler: Connect.NextHandleFunction = (req, res, next) => {
+        const url = new URL(req.url ?? "", "http://localhost").searchParams.get("url");
+        if (!url) return next();
+        let target: URL;
+        try {
+            target = new URL(url);
+        } catch {
+            res.statusCode = 400;
+            return res.end("invalid url");
+        }
+        if (target.protocol !== "http:" && target.protocol !== "https:") {
+            res.statusCode = 400;
+            return res.end("http(s) only");
+        }
+        void fetch(target, { headers: { accept: "text/html, text/plain, application/json" }, redirect: "follow" })
+            .then(async (r) => {
+                res.statusCode = r.status;
+                res.setHeader("content-type", r.headers.get("content-type") ?? "text/plain");
+                res.end(Buffer.from(await r.arrayBuffer()));
+            })
+            .catch((e: unknown) => {
+                res.statusCode = 502;
+                res.end(`proxy fetch failed: ${e instanceof Error ? e.message : String(e)}`);
+            });
+    };
+    return {
+        name: "cors-proxy",
+        configureServer(server) {
+            server.middlewares.use("/__proxy", handler);
+        },
+        configurePreviewServer(server) {
+            server.middlewares.use("/__proxy", handler);
+        },
+    };
+}
+
 // Tauri expects a fixed dev port and no clearing of its own CLI output.
 export default defineConfig({
-    plugins: [react(), tailwindcss()],
+    plugins: [react(), tailwindcss(), corsProxy()],
     resolve: {
         alias: {
             "@": fileURLToPath(new URL("./src", import.meta.url)),

@@ -24,7 +24,8 @@ then answer grounded in what you found. Name the sources you used. If a tool res
 {denied: true}, the user refused access — say what you could not check and answer from
 what you have. If nothing relevant exists, say so plainly.`;
 
-const RESEARCH_INSTRUCTIONS = `You are the research agent: you read specific web pages with fetch_url and report
+const RESEARCH_INSTRUCTIONS = `Start broad with search_web, then fetch_url the most promising results. Prefer primary sources.
+You are the research agent: you read specific web pages with fetch_url and report
 what they say. Only fetch URLs that were given to you or that appear in pages you
 already fetched. Quote or closely paraphrase sources and name the URL for each claim.
 If a tool result reports {denied: true}, the user refused that fetch — do not retry
@@ -60,9 +61,9 @@ export async function seedBuiltinAgents(): Promise<void> {
             id: BUILTIN_AGENT_IDS.research,
             name: "Research",
             description:
-                "Reads specific web pages. Use when the user provides URLs or asks about the content of a particular site.",
+                "Searches the web and reads pages. Use for anything that needs current outside information — news, docs, prices, or a specific URL.",
             instructions: RESEARCH_INSTRUCTIONS,
-            tools: ["fetch_url"],
+            tools: ["search_web", "fetch_url"],
         },
         {
             id: BUILTIN_AGENT_IDS.planner,
