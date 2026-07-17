@@ -30,7 +30,7 @@
 - Chat auto-naming skips a session if you switch away mid-stream (self-heals next exchange).
 - Project stars cap satellites at 6 chats/5 files; extra chats are reachable via the sidebar, not the sphere.
 - FTS insert isn't transactional with the message insert; interrupted boot backfill doesn't resume (revisit with WHERE NOT IN if it ever bites).
-- searchSessionIds comment previously claimed ordering it didn't have (fix the comment now as part of this commit — src/db/repo/messages.ts).
+- searchSessionIds returns session ids in no defined order — add ORDER BY if a caller ever needs recency.
 
 ## 2026-07-17 — Categories & Signal plan
 
