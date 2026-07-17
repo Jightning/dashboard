@@ -77,6 +77,11 @@ evals/            router/tools/permissions/compaction .eval.ts, fixtures/, score
 docs/             idea.md, architecture.md, roadmap.md
 ```
 
+Shell.tsx composes the app chrome: sidebar nav, StatusBar (live due-today/
+next-automation readouts via `StatusReadouts.tsx`, model chip → Settings),
+and restores/persists nav position (page, tab, open chat) plus per-session
+composer drafts to localStorage under versioned `hugh.*` keys.
+
 ## Stack and why each piece is free
 
 | Piece | Choice | License / cost | Why |
@@ -257,6 +262,13 @@ attachments        id, message_id, document_id, kind ('image'|'pdf'|'audio'),
 Binary bytes go to files via plugin-fs, never DB blobs. Token usage lives on
 messages (aggregate with SUM); a separate usage table only if per-day reporting is
 ever wanted.
+
+The semester-planner migration (0006) added `courses`, `tasks`, and `events` —
+not re-sketched above. Worth flagging: `events.source` defaults to `'ics'`
+(class-schedule import) but the calendar's quick-add form now writes
+`'manual'` for user-created events, which are the only ones deletable in
+place. Manual events don't carry `category_id` — they color by kind, and
+category filtering of events still flows through the course link.
 
 **Future tables (dashboard phases — sketch only, not migrated yet):**
 
