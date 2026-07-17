@@ -51,9 +51,12 @@ Why this shape:
 ```txt
 src/
   app/            Shell + sections: home/, agents/ (chat, roster, pipelines,
-                  automations), projects/, notes/ (notes, bookmarks, snippets),
-                  planner/ (tasks, calendar, applications, review), presets/,
-                  permissions/, settings/
+                  automations), categories/ (CategoriesPage, CategoryDetail —
+                  Projects | Chats | Tasks | Notes tabs; projects/ProjectDetail
+                  opens from here), notes/ (notes + review flashcards,
+                  bookmarks, snippets), planner/ (tasks, calendar-first with
+                  7d/14d/month views, applications), presets/, permissions/,
+                  settings/
   components/     ui/ (shadcn), chat/ (MessageList, Composer, ApprovalCard,
                   TokenMeter, PresetPicker, PermissionLevelDropdown)
   ai/
@@ -106,9 +109,13 @@ Plain orchestrator–worker composition on AI SDK primitives. No agent framework
   `stopWhen: stepCountIs(6)`. Quick Q&A costs zero delegation.
 - **Knowledge agent** — tools `search_documents` (FTS5 MATCH + snippets),
   `read_document`, `list_documents`. Runs on the preset's main model.
-- **Research agent** — tool `fetch_url` (plugin-http GET, HTML→text, size-capped),
-  permission-scoped by domain. No search API in v1: there's no reliable free one;
-  SearXNG or Brave free tier are candidates later.
+- **Research agent** — tools `search_web` (DuckDuckGo HTML endpoint,
+  `html.duckduckgo.com`, no key, $0) and `fetch_url` (HTML→text, size-capped),
+  both permission-scoped by domain. Desktop reaches both through
+  `tauri-plugin-http` (no CORS). The browser target has no such escape hatch,
+  so `wrapWebFetch` (`src/ai/providers/appFetch.ts`) rewrites outbound web-tool
+  requests through a Vite dev/preview middleware, `/__proxy?url=`
+  (`vite.config.ts`), which does the cross-origin fetch server-side.
 - **Planner agent** — deliberately deferred. It has no real tools until tasks/notes
   exist (Phase 3+); building a stub now is dead code.
 
@@ -230,11 +237,16 @@ presets            id, name, description, system_prompt, provider, model,
 permission_levels  id, name, description, is_builtin, created_at
 permission_grants  id, level_id, tool, access ('read'|'write'),
                    scope_type ('any'|'doc_folder'|'url_domain'), scope_value
+categories         id, name UNIQUE, color, timestamps — the universal tag;
+                   projects/tasks/notes/chat_sessions/courses carry category_id
 chat_sessions      id, title, preset_id, permission_level_id (session override),
-                   compaction_summary, timestamps
+                   compaction_summary, category_id, auto_summary, auto_tags_json
+                   (router-model metadata), timestamps
 chat_messages      id, session_id, role, parts_json (AI SDK UIMessage parts),
                    agent, model, input_tokens, output_tokens, cached_input_tokens,
                    compacted (0|1), created_at
+messages_fts       FTS5 (message_id, session_id, content) — written by the
+                   messages repo from extracted text parts, backfilled at boot
 documents          id, title, source_name, mime_type, folder (permission scope key),
                    content_text, byte_size, page_count, created_at
 documents_fts      FTS5 over (title, content_text), synced by triggers

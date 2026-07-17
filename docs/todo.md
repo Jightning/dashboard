@@ -24,3 +24,45 @@
 
 - Project stars don't navigate on click yet (hover only explains them) — revisit if it feels dead in practice.
 - `notes.project_id` (project-scoped notes) was deliberately skipped as YAGNI; add if project detail pages need it.
+
+## 2026-07-17 — Categories & Signal plan
+
+Shipped (branch `feat/categories-signal`, Tasks 1-13):
+
+- [x] Categories are now first-class: `categories` table, `category_id` on
+      projects/tasks/notes/chat_sessions/courses, migration backfills existing
+      courses into categories. Projects section renamed to Categories
+      (CategoriesPage + CategoryDetail with Projects/Chats/Tasks/Notes tabs);
+      ProjectDetail unchanged, opened from a category.
+- [x] Planner opens on a calendar first (7d/14d/month views, unified
+      tasks+events+automations+application follow-ups via
+      `planner/calendarItems.ts`); tasks filter by category.
+- [x] Review (flashcards) moved from Planner into Notes, with a
+      "make flashcards" button per note (`src/ai/notes/flashcardGen.ts`);
+      notes gained categories.
+- [x] Real web access: `search_web` tool (DuckDuckGo HTML endpoint, $0) plus
+      `fetch_url`, both on the builtin Research agent; a Vite `/__proxy`
+      dev/preview middleware unblocks CORS for the browser target
+      (desktop already had it via plugin-http).
+- [x] Pipeline `{{token}}` editor replaced with an overlay pill editor
+      (`TemplateEditor`) shared by pipelines and automations; a starter
+      template gallery (`src/ai/pipelines/templates.ts`) and save-run-to-note.
+- [x] Chat sessions get router-model auto-title/summary/tags
+      (`src/ai/chat/metadata.ts`); sidebar gained search (FTS5 over message
+      text + tags/title), category filter, and file-to-category/project
+      selects.
+- [x] Universe network splits into per-category spheres with an exo-shell
+      layer for archive/overflow chats and wheel zoom
+      (`buildCategoryUniverse`, `shell` field in `networkData.ts`).
+
+Deliberately not done this round (carried forward from `plan.md`, YAGNI):
+
+- Bookmarks/snippets don't get their own `category_id` — they already filter
+  by group and project, and a project carries its category. Revisit if that
+  indirection ever bites.
+- No "Uncategorized" drill-in page — unfiled items remain visible in their
+  home sections; only the network sphere gets an "unfiled" star.
+- Flashcards keep folder scoping (no `category_id`) — the Review-tab move +
+  copy fixes the confusion, not a new tagging axis.
+- No calendar event *creation* UI — events still come from ICS import;
+  tasks/automations/applications remain the user-authored time entries.
