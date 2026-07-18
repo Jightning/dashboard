@@ -11,6 +11,7 @@ import type { FileUIPart } from "ai";
 import { Button } from "@/components/ui/button";
 import { fileToImagePart } from "@/ai/multimodal/image";
 import { MicRecorder } from "@/ai/multimodal/stt";
+import { loadDraft, saveDraft } from "@/lib/drafts";
 import { cn } from "@/lib/utils";
 
 export function Composer({
@@ -36,14 +37,9 @@ export function Composer({
     /** Key to persist an in-progress draft under (e.g. the session id). */
     draftKey?: string;
 }) {
-    const [text, setText] = useState(() => {
-        if (!draftKey) return "";
-        try {
-            return localStorage.getItem(`hugh.draft.${draftKey}`) ?? "";
-        } catch {
-            return "";
-        }
-    });
+    const [text, setText] = useState(() =>
+        draftKey ? loadDraft(draftKey) : "",
+    );
     const [images, setImages] = useState<FileUIPart[]>([]);
     const [notice, setNotice] = useState<string | null>(null);
     const [recording, setRecording] = useState(false);
@@ -65,26 +61,13 @@ export function Composer({
     // Persist the draft, debounced; clear the key when the draft empties.
     useEffect(() => {
         if (!draftKey) return;
-        const key = `hugh.draft.${draftKey}`;
-        const handle = setTimeout(() => {
-            try {
-                if (text) localStorage.setItem(key, text);
-                else localStorage.removeItem(key);
-            } catch {
-                // best-effort
-            }
-        }, 300);
+        const handle = setTimeout(() => saveDraft(draftKey, text), 300);
         return () => {
             clearTimeout(handle);
             // Flush synchronously on unmount/session switch so a pending
             // debounced write isn't silently dropped (e.g. typing then
             // immediately switching sessions).
-            try {
-                if (text) localStorage.setItem(key, text);
-                else localStorage.removeItem(key);
-            } catch {
-                // best-effort
-            }
+            saveDraft(draftKey, text);
         };
     }, [draftKey, text]);
 

@@ -52,6 +52,7 @@ import {
 import type { NavTarget } from "@/app/Sidebar";
 import { Typewriter } from "@/components/hud/Typewriter";
 import { PermissionLevelSelect } from "@/components/PermissionLevelSelect";
+import { removeDraft } from "@/lib/drafts";
 import { InstancesSidebar } from "./InstancesSidebar";
 
 interface ActiveChat {
@@ -276,11 +277,7 @@ export function ChatWorkspace({
             try {
                 await sessionsRepo.deleteSession(session.id);
                 setSessions(await sessionsRepo.listSessions());
-                try {
-                    localStorage.removeItem(`hugh.draft.${session.id}`);
-                } catch {
-                    // best-effort
-                }
+                removeDraft(session.id);
                 if (active?.session.id === session.id) {
                     setActive(null);
                     onSessionOpened?.(null);
