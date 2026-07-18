@@ -74,7 +74,7 @@ src/
 src-tauri/        Cargo.toml, tauri.conf.json, capabilities/, src/lib.rs,
                   migrations/*.sql
 evals/            router/tools/permissions/compaction .eval.ts, fixtures/, scorers.ts
-docs/             idea.md, architecture.md, roadmap.md
+docs/             idea.md, architecture.md, hosting.md, roadmap.md
 ```
 
 Shell.tsx composes the app chrome: sidebar nav, StatusBar (live due-today/
@@ -300,6 +300,11 @@ feature ships as agent tools behind the same engine.
 The entire state is one SQLite file plus the attachments dir in app-data. Backup is
 "copy `dashboard.db` (and `attachments/`) somewhere" — a dated copy on a schedule
 once tasks/cron exist (Phase 4), manual before then.
+
+This section covers the desktop build. The web build (a static SPA + one proxy
+function, for deployments like Cloudflare Pages) has no filesystem to back up
+to and a per-browser database instead — see `docs/hosting.md` for that target's
+data model, deploy steps, and the COOP/COEP requirement OPFS depends on.
 
 ## Deliberate tradeoffs
 
