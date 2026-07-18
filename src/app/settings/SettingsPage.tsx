@@ -280,8 +280,13 @@ export function SettingsPage() {
                     <CardHeader>
                         <CardTitle>Usage</CardTitle>
                         <p className="text-xs text-muted-foreground">
-                            Gemini free tier resets daily; Ollama is always
-                            $0.
+                            Token counts are real usage reported by each
+                            provider, summed from your message history.
+                            Gemini&rsquo;s free tier resets daily (around
+                            midnight Pacific); when today&rsquo;s Gemini row
+                            climbs toward your quota, switch the preset to
+                            Ollama or another key. Requests-per-day quotas
+                            are not shown — this tracks tokens only.
                         </p>
                     </CardHeader>
                     <CardContent>
@@ -300,12 +305,72 @@ export function SettingsPage() {
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {usage.map((row) => (
-                                        <tr key={`${row.day}-${row.model}`}>
-                                            <td className="pr-4 py-0.5">{row.day}</td>
-                                            <td className="pr-4 py-0.5">{row.model}</td>
-                                            <td className="pr-4 py-0.5">{row.inputTokens}</td>
-                                            <td className="py-0.5">{row.outputTokens}</td>
+                                    {usage.map((row) => {
+                                        const isToday =
+                                            row.day ===
+                                            new Date()
+                                                .toISOString()
+                                                .slice(0, 10);
+                                        return (
+                                            <tr
+                                                key={`${row.day}-${row.model}`}
+                                                className={
+                                                    isToday
+                                                        ? "text-primary"
+                                                        : undefined
+                                                }
+                                            >
+                                                <td className="pr-4 py-0.5">
+                                                    {row.day}
+                                                </td>
+                                                <td className="pr-4 py-0.5">
+                                                    {row.model}
+                                                </td>
+                                                <td className="pr-4 py-0.5">
+                                                    {row.inputTokens.toLocaleString()}
+                                                </td>
+                                                <td className="py-0.5">
+                                                    {row.outputTokens.toLocaleString()}
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                    <tr className="border-t border-border text-muted-foreground">
+                                        <td
+                                            className="pr-4 pt-1 font-medium"
+                                            colSpan={4}
+                                        >
+                                            total (last 14 days)
+                                        </td>
+                                    </tr>
+                                    {Object.entries(
+                                        usage.reduce<
+                                            Record<
+                                                string,
+                                                { input: number; output: number }
+                                            >
+                                        >((totals, row) => {
+                                            const t = totals[row.model] ?? {
+                                                input: 0,
+                                                output: 0,
+                                            };
+                                            t.input += row.inputTokens;
+                                            t.output += row.outputTokens;
+                                            totals[row.model] = t;
+                                            return totals;
+                                        }, {}),
+                                    ).map(([model, totals]) => (
+                                        <tr key={`total-${model}`}>
+                                            <td className="pr-4 py-0.5" />
+                                            <td className="pr-4 py-0.5">
+                                                {model}
+                                            </td>
+                                            <td className="pr-4 py-0.5">
+                                                {totals.input.toLocaleString()}
+                                            </td>
+                                            <td className="py-0.5">
+                                                {totals.output.toLocaleString()}
+                                            </td>
                                         </tr>
                                     ))}
                                 </tbody>
