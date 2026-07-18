@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { buildCategoryUniverse, buildUniverseNetwork, relativeTime } from "./networkData";
+import {
+    buildCategoryUniverse,
+    buildUniverseNetwork,
+    relativeTime,
+    CATEGORY_INNER,
+    EXO_LAYER_SIZE,
+    EXO_SHELL_BASE,
+    EXO_SHELL_STEP,
+} from "./networkData";
 import type { AgentDef, Category, ChatSession, Preset, Project } from "@/lib/schemas";
 
 function session(id: string, over: Partial<ChatSession> = {}): ChatSession {
@@ -173,9 +181,30 @@ describe("buildCategoryUniverse", () => {
         });
         const chats = net.nodes.filter((n) => n.kind === "session");
         expect(chats).toHaveLength(12);
-        expect(chats.filter((n) => (n.shell ?? 1) > 1)).toHaveLength(12 - 8);
+        expect(chats.filter((n) => (n.shell ?? 1) > 1)).toHaveLength(12 - CATEGORY_INNER);
         // Newest stay inner.
         expect(chats.find((n) => n.id === "session:ses_0")!.shell ?? 1).toBe(1);
+    });
+
+    it("splits exo overflow into rings of EXO_LAYER_SIZE with stepped shells", () => {
+        const sessions = Array.from({ length: CATEGORY_INNER + 30 }, (_, i) =>
+            session(`ses_${i}`, { category_id: "cat_a", updated_at: 1000 - i }),
+        );
+        const net = buildCategoryUniverse({
+            categories: [cat("cat_a", "School")],
+            projects: [], sessions, documents: [], presets: [], agents: [],
+            focusCategoryId: "cat_a",
+        });
+        const exo = net.nodes.filter((n) => (n.shell ?? 1) > 1);
+        expect(exo).toHaveLength(30);
+        const shells = new Set(exo.map((n) => n.shell));
+        expect(shells).toEqual(
+            new Set([EXO_SHELL_BASE, EXO_SHELL_BASE + EXO_SHELL_STEP, EXO_SHELL_BASE + 2 * EXO_SHELL_STEP]),
+        );
+        // Ring 0 holds the newest EXO_LAYER_SIZE of the overflow.
+        expect(
+            exo.filter((n) => n.shell === EXO_SHELL_BASE),
+        ).toHaveLength(EXO_LAYER_SIZE);
     });
 
     it("focused chat stars carry subtle agent satellites, no tools", () => {

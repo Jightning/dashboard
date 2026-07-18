@@ -361,7 +361,12 @@ export function buildUniverseNetwork(opts: {
 }
 
 export const CATEGORY_INNER = 8;
-export const EXO_SHELL = 1.75;
+/** Overflow chats beyond CATEGORY_INNER split into rings of this many. */
+export const EXO_LAYER_SIZE = 12;
+/** Shell radius multiplier of the innermost exo ring (ring 0). */
+export const EXO_SHELL_BASE = 1.75;
+/** Additional shell radius each successive ring sits at. */
+export const EXO_SHELL_STEP = 0.4;
 export const UNFILED_ID = "unfiled";
 
 /**
@@ -369,8 +374,9 @@ export const UNFILED_ID = "unfiled";
  * category plus an "unfiled" star when untagged chats exist. Focused on a
  * category (or the "unfiled" sentinel): its projects as stars with their
  * chats/files clustered, direct chats as stars — newest CATEGORY_INNER on
- * the main sphere, the rest pushed to the exo-shell (shell EXO_SHELL),
- * reachable by zooming out.
+ * the main sphere, the rest pushed to unlimited exo-shell rings of
+ * EXO_LAYER_SIZE each (shell EXO_SHELL_BASE + ring * EXO_SHELL_STEP),
+ * reachable by zooming out ring by ring.
  */
 export function buildCategoryUniverse(opts: {
     categories: Category[];
@@ -534,27 +540,32 @@ export function buildCategoryUniverse(opts: {
         );
     }
 
-    // Overflow: older chats orbit outside the chart circle — scroll out.
-    const exoUnits = fibonacciSphere(Math.max(1, exo.length));
-    exo.forEach((s, i) => {
-        const preset = s.preset_id ? presetById.get(s.preset_id) : undefined;
-        net.nodes.push({
-            id: `session:${s.id}`,
-            kind: "session",
-            label: s.title,
-            color: sessionColor(s, preset, agentsById),
-            unit: exoUnits[i]!,
-            r: AGENT_R,
-            shell: EXO_SHELL,
-            primary: true,
-            meta: {
-                title: s.title,
-                subtitle: preset ? preset.name : "no preset",
-                foot: `exo-sphere · updated ${relativeTime(s.updated_at)}`,
-            },
-            payload: s,
+    // Overflow: older chats orbit outside the chart circle in rings of
+    // EXO_LAYER_SIZE, each ring one shell farther out — scroll out to reach them.
+    for (let layer = 0; layer * EXO_LAYER_SIZE < exo.length; layer++) {
+        const ring = exo.slice(layer * EXO_LAYER_SIZE, (layer + 1) * EXO_LAYER_SIZE);
+        const ringUnits = fibonacciSphere(Math.max(1, ring.length));
+        const shell = EXO_SHELL_BASE + layer * EXO_SHELL_STEP;
+        ring.forEach((s, i) => {
+            const preset = s.preset_id ? presetById.get(s.preset_id) : undefined;
+            net.nodes.push({
+                id: `session:${s.id}`,
+                kind: "session",
+                label: s.title,
+                color: sessionColor(s, preset, agentsById),
+                unit: ringUnits[i]!,
+                r: AGENT_R,
+                shell,
+                primary: true,
+                meta: {
+                    title: s.title,
+                    subtitle: preset ? preset.name : "no preset",
+                    foot: `exo-sphere · ring ${layer + 1} · updated ${relativeTime(s.updated_at)}`,
+                },
+                payload: s,
+            });
         });
-    });
+    }
 
     return net;
 }

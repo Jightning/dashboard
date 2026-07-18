@@ -8,11 +8,14 @@ import {
     quatNormalize,
     type Quat,
 } from "./sphere";
-import type { NetworkEdge, NetworkNode } from "./networkData";
+import { EXO_SHELL_BASE, EXO_SHELL_STEP, type NetworkEdge, type NetworkNode } from "./networkData";
 
 const RADIUS = 40; // sphere radius in the 0–100 viewBox
-const EXO_REVEAL_START = 0.95; // exo starts fading in below this zoom
-const EXO_REVEAL_FULL = 0.7; // fully visible at or below this zoom
+const EXO_REVEAL_SPAN = 0.12; // zoom range each ring takes to fade in
+const EXO_REVEAL_FIRST = 0.95; // ring 0 starts revealing below this zoom
+const EXO_PULL = 0.5; // how much farther out an unrevealed ring sits
+const INNER_FADE_START = 0.85; // inner sphere starts receding below this zoom
+const INNER_FADE_FLOOR = 0.12; // and bottoms out at this opacity factor
 const SPIN = 0.12; // idle spin (rad/s)
 const IDLE_MS = 3000; // resume auto-spin after this long without interaction
 const SENS = 0.01; // drag sensitivity (rad per px)
@@ -112,22 +115,36 @@ export function NetworkSphere({
                 hov && byId.has(hov) ? roots[byId.get(hov)!]! : null;
 
             const zoom = zoomRef.current;
-            const reveal = Math.min(
-                1,
-                Math.max(
-                    0,
-                    (EXO_REVEAL_START - zoom) / (EXO_REVEAL_START - EXO_REVEAL_FULL),
+            // Inner sphere recedes as the view pulls back to make room for the
+            // exo rings sliding in — reads as focus shifting outward. Clamped
+            // so it's fully opaque at rest (zoom >= INNER_FADE_START).
+            const innerFade = Math.max(
+                INNER_FADE_FLOOR,
+                Math.min(
+                    1,
+                    1 -
+                        ((INNER_FADE_START - zoom) / (INNER_FADE_START - 0.6)) *
+                            (1 - INNER_FADE_FLOOR),
                 ),
             );
 
             const proj: { cx: number; cy: number; depth: number }[] = [];
             for (let i = 0; i < nodes.length; i++) {
                 const node = nodes[i]!;
-                const p = projectQuat(
-                    node.unit,
-                    orient,
-                    RADIUS * zoomRef.current * (node.shell ?? 1),
-                );
+                const shell = node.shell ?? 1;
+                let ringReveal = 1;
+                if (shell > 1) {
+                    const layer = Math.round((shell - EXO_SHELL_BASE) / EXO_SHELL_STEP);
+                    const start = EXO_REVEAL_FIRST - layer * EXO_REVEAL_SPAN;
+                    ringReveal = Math.min(
+                        1,
+                        Math.max(0, (start - zoom) / EXO_REVEAL_SPAN),
+                    );
+                }
+                // Unrevealed rings sit farther out and slide in to their shell
+                // as ringReveal climbs — the scroll-driven "pull-in" animation.
+                const effShell = shell > 1 ? shell + (1 - ringReveal) * EXO_PULL : 1;
+                const p = projectQuat(node.unit, orient, RADIUS * zoom * effShell);
                 proj.push(p);
                 const focus = hoveredRoot ? roots[i] === hoveredRoot : true;
                 const dim = hoveredRoot != null && !focus;
@@ -136,7 +153,8 @@ export function NetworkSphere({
                 if (node.kind === "tool") op *= 0.8;
                 if (dim) op *= 0.22;
                 else if (hoveredRoot && focus) op = Math.min(1, op * 1.4);
-                if ((node.shell ?? 1) > 1) op *= 0.6 * reveal;
+                if (shell > 1) op *= 0.6 * ringReveal;
+                else op *= innerFade;
 
                 const rScale =
                     (0.6 + 0.4 * p.depth) * (hoveredRoot && focus ? 1.15 : 1);
@@ -164,18 +182,19 @@ export function NetworkSphere({
                     hit.setAttribute("cy", String(p.cy));
                     hit.setAttribute("r", String(node.r * 2 + 3));
                     // Back-hemisphere nodes shouldn't intercept front clicks;
-                    // hidden exo nodes (reveal ~0) shouldn't be hoverable/clickable.
+                    // hidden exo rings and a faded-out inner sphere shouldn't
+                    // be hoverable/clickable.
+                    const revealed = shell > 1 ? ringReveal > 0.2 : innerFade >= 0.2;
                     hit.style.pointerEvents =
-                        p.depth > 0.45 && ((node.shell ?? 1) === 1 || reveal > 0.2)
-                            ? "auto"
-                            : "none";
+                        p.depth > 0.45 && revealed ? "auto" : "none";
                 }
                 const label = labelEls.current[i];
                 if (label) {
                     let lop = 0;
                     if (node.primary && !dim) lop = 0.5 + 0.5 * p.depth;
                     if (hoveredRoot && focus) lop = 0.92;
-                    if ((node.shell ?? 1) > 1) lop *= reveal;
+                    if (shell > 1) lop *= ringReveal;
+                    else lop *= innerFade;
                     label.setAttribute("x", String(p.cx));
                     label.setAttribute("y", String(p.cy - node.r * rScale - 1.5));
                     label.setAttribute("opacity", String(lop));
@@ -198,6 +217,8 @@ export function NetworkSphere({
                 let eop = 0.05 + 0.28 * ((a.depth + b.depth) / 2);
                 if (hoveredRoot && !focus) eop *= 0.18;
                 else if (hoveredRoot && focus) eop = Math.min(0.6, eop * 2.2);
+                // Edges only ever connect inner-sphere nodes — recede with it.
+                eop *= innerFade;
                 // Constellation lines read as faint engraved hairlines, not
                 // colored wires — scale into a ~0.04–0.18 range.
                 l.setAttribute("stroke-opacity", String(eop * 0.7));
@@ -332,7 +353,7 @@ export function NetworkSphere({
             e.preventDefault();
             zoomRef.current = Math.min(
                 1.1,
-                Math.max(0.55, zoomRef.current * (e.deltaY > 0 ? 0.92 : 1.08)),
+                Math.max(0.35, zoomRef.current * (e.deltaY > 0 ? 0.92 : 1.08)),
             );
             lastInteractionRef.current = performance.now();
             if (reduced) draw();
