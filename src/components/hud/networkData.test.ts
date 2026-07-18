@@ -5,6 +5,7 @@ import {
     relativeTime,
     CATEGORY_INNER,
     EXO_LAYER_SIZE,
+    MAX_EXO_RINGS,
     EXO_SHELL_BASE,
     EXO_SHELL_STEP,
 } from "./networkData";
@@ -205,6 +206,27 @@ describe("buildCategoryUniverse", () => {
         expect(
             exo.filter((n) => n.shell === EXO_SHELL_BASE),
         ).toHaveLength(EXO_LAYER_SIZE);
+    });
+
+    it("the terminal ring absorbs overflow beyond MAX_EXO_RINGS — nothing unreachable", () => {
+        const deep = CATEGORY_INNER + MAX_EXO_RINGS * EXO_LAYER_SIZE + 20;
+        const sessions = Array.from({ length: deep }, (_, i) =>
+            session(`ses_${i}`, { category_id: "cat_a", updated_at: 10_000 - i }),
+        );
+        const net = buildCategoryUniverse({
+            categories: [cat("cat_a", "School")],
+            projects: [], sessions, documents: [], presets: [], agents: [],
+            focusCategoryId: "cat_a",
+        });
+        const exo = net.nodes.filter((n) => (n.shell ?? 1) > 1);
+        // Every overflow chat renders — none dropped past the last ring.
+        expect(exo).toHaveLength(deep - CATEGORY_INNER);
+        const lastShell = EXO_SHELL_BASE + (MAX_EXO_RINGS - 1) * EXO_SHELL_STEP;
+        expect(Math.max(...exo.map((n) => n.shell!))).toBe(lastShell);
+        // The terminal ring holds its normal share plus everything deeper.
+        expect(exo.filter((n) => n.shell === lastShell)).toHaveLength(
+            EXO_LAYER_SIZE + 20,
+        );
     });
 
     it("focused chat stars carry subtle agent satellites, no tools", () => {

@@ -33,7 +33,7 @@ export async function runDailyBackup(): Promise<string | null> {
     return target;
 }
 
-/** Everything-as-markdown escape hatch; also the web target's "backup". */
+/** Notes-only markdown export — NOT a full backup; chats/documents/tasks have no export path yet. */
 export async function exportNotesMarkdown(): Promise<Blob> {
     const summaries = await listNotes();
     const parts: string[] = [];

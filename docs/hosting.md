@@ -20,11 +20,14 @@ the visitor's own browser:
   `localStorage` (`createLocalStorageSettingsStore` in
   `src/ai/providers/keys.ts`), never sent anywhere except straight to the
   provider the key belongs to.
-- "Backup" for the web target is the in-app markdown export
-  (`exportNotesMarkdown` in `src/lib/backup.ts`) — there is no scheduled
-  file-system backup like the desktop build's `runDailyBackup`, because the
-  web target has no filesystem to write a dated copy to. Export regularly if
-  you care about the data; clearing site data or switching browsers loses it.
+- **The web target has no full backup path.** The in-app markdown export
+  (`exportNotesMarkdown` in `src/lib/backup.ts`) covers **notes only** —
+  chat history, documents, tasks, and everything else in the browser
+  database currently has no export. There is no scheduled file-system
+  backup like the desktop build's `runDailyBackup` (no filesystem to write
+  to). Treat hosted data as expendable until a whole-database export
+  exists: clearing site data or switching browsers loses everything except
+  what you exported.
 
 Two people hitting the same hosted URL do not share a database, a session, or
 anything else — each browser is its own isolated instance.

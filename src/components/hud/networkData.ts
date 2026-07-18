@@ -367,6 +367,13 @@ export const EXO_LAYER_SIZE = 12;
 export const EXO_SHELL_BASE = 1.75;
 /** Additional shell radius each successive ring sits at. */
 export const EXO_SHELL_STEP = 0.4;
+/**
+ * Deepest renderable ring. Ring 5+ would fall below NetworkSphere's zoom
+ * floor (reveal band start 0.95 - 5*0.12 = 0.35) and clip the viewBox, so
+ * the last ring is a terminal catch-all holding ALL remaining overflow —
+ * every chat stays reachable on the sphere, the last ring just gets denser.
+ */
+export const MAX_EXO_RINGS = 5;
 export const UNFILED_ID = "unfiled";
 
 /**
@@ -542,8 +549,16 @@ export function buildCategoryUniverse(opts: {
 
     // Overflow: older chats orbit outside the chart circle in rings of
     // EXO_LAYER_SIZE, each ring one shell farther out — scroll out to reach them.
-    for (let layer = 0; layer * EXO_LAYER_SIZE < exo.length; layer++) {
-        const ring = exo.slice(layer * EXO_LAYER_SIZE, (layer + 1) * EXO_LAYER_SIZE);
+    for (
+        let layer = 0;
+        layer < MAX_EXO_RINGS && layer * EXO_LAYER_SIZE < exo.length;
+        layer++
+    ) {
+        // The terminal ring absorbs everything deeper than the last band.
+        const ring =
+            layer === MAX_EXO_RINGS - 1
+                ? exo.slice(layer * EXO_LAYER_SIZE)
+                : exo.slice(layer * EXO_LAYER_SIZE, (layer + 1) * EXO_LAYER_SIZE);
         const ringUnits = fibonacciSphere(Math.max(1, ring.length));
         const shell = EXO_SHELL_BASE + layer * EXO_SHELL_STEP;
         ring.forEach((s, i) => {
