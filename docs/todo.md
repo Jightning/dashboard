@@ -1,9 +1,10 @@
 # TODO
 
-(Items planned in the current `plan.md` round — web-search trust, hourly 1-day
-view, paste-text documents, exo-sphere layers, Ollama setup, usage visibility,
-draft limits, hosting readiness — have been removed from this list; what
-remains is deliberately deferred to a future round.)
+(Items shipped in the trust/hosting `plan.md` round — web-search trust,
+hourly 1-day view, paste-text documents, exo-sphere layers, Ollama setup,
+usage visibility, draft limits (now bounded: size cap, TTL, pruning),
+hosting readiness — have been removed from this list; what remains is
+deliberately deferred to a future round.)
 
 ## Planner
 

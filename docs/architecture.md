@@ -155,10 +155,11 @@ Decision order for every tool call, orchestrator and specialists alike:
 - Each tool declares a `scopeOf(args)` extractor: `read_document` resolves the
   document's folder, `fetch_url` resolves the hostname. Grants match on scope prefix
   (folders) or exact domain.
-- Built-in levels: **Ask everything** (zero grants — the old v1 behavior) and
-  **Read documents** (read-only, any folder). Users create custom levels in the
-  permissions page (e.g. "Study": read-only `/school`; "Research": adds `fetch_url`
-  for chosen domains).
+- Built-in levels: **Ask everything** (zero grants — the old v1 behavior),
+  **Read documents** (read-only, any folder), and **Reads only** (every read
+  tool in the catalog auto-allowed, any scope; writes still ask). Users create
+  custom levels in the permissions page (e.g. "Study": read-only `/school`;
+  "Research": adds `fetch_url` for chosen domains).
 - Write grants are never part of built-in levels; creating one is an explicit user
   act in the permissions UI.
 - Mechanics: if the installed `ai` version's tool-approval API (`needsApproval`) is
