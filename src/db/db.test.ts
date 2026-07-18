@@ -7,6 +7,7 @@ import * as documents from "./repo/documents";
 import * as notes from "./repo/notes";
 import * as permissions from "./repo/permissions";
 import * as presets from "./repo/presets";
+import * as projects from "./repo/projects";
 
 let db: ReturnType<typeof createTestDbClient>;
 
@@ -137,6 +138,25 @@ describe("documents + FTS5", () => {
             mimeType: "text/plain",
         });
         expect(await documents.searchDocuments("microcont")).toHaveLength(1);
+    });
+
+    it("plants a text document with a project_id that round-trips through search and fetch", async () => {
+        const project = await projects.createProject({ name: "Widget Launch" });
+        const doc = await documents.insertDocument({
+            title: "Pasted note",
+            contentText: "the quokka guards the archive at midnight",
+            mimeType: "text/plain",
+            folder: "/projects/widget-launch",
+            projectId: project.id,
+        });
+        expect(doc.project_id).toBe(project.id);
+
+        const hits = await documents.searchDocuments("quokka guards archive");
+        expect(hits).toHaveLength(1);
+        expect(hits[0]?.id).toBe(doc.id);
+
+        const fetched = await documents.getDocument(doc.id);
+        expect(fetched.project_id).toBe(project.id);
     });
 
     it("lists documents scoped to a folder without content", async () => {

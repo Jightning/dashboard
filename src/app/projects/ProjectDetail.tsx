@@ -3,6 +3,7 @@ import {
     ArrowLeft,
     Check,
     ExternalLink,
+    FileText,
     MessageSquare,
     Plus,
     Trash2,
@@ -24,7 +25,7 @@ import { openExternal } from "@/lib/openExternal";
 import { relativeTime } from "@/components/hud/networkData";
 import { SESSION_COLORS } from "@/app/chat/InstancesSidebar";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Input, Textarea } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -68,6 +69,9 @@ export function ProjectDetail({
     const [confirmingDelete, setConfirmingDelete] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const fileInputRef = useRef<HTMLInputElement | null>(null);
+    const [addingText, setAddingText] = useState(false);
+    const [textTitle, setTextTitle] = useState("");
+    const [textBody, setTextBody] = useState("");
 
     const slug = project.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
     const folder = `/projects/${slug}`;
@@ -130,6 +134,29 @@ export function ProjectDetail({
                     });
                 }
             }
+            await refreshDocs();
+        } catch (e) {
+            setError(e instanceof Error ? e.message : String(e));
+        }
+    };
+
+    const saveText = async () => {
+        const title = textTitle.trim();
+        const contentText = textBody.trim();
+        if (!title || !contentText) return;
+        setError(null);
+        try {
+            await insertDocument({
+                title,
+                contentText,
+                mimeType: "text/plain",
+                folder,
+                projectId: project.id,
+                byteSize: contentText.length,
+            });
+            setTextTitle("");
+            setTextBody("");
+            setAddingText(false);
             await refreshDocs();
         } catch (e) {
             setError(e instanceof Error ? e.message : String(e));
@@ -221,13 +248,23 @@ export function ProjectDetail({
                 <Card corners>
                     <CardHeader className="flex-row items-center justify-between">
                         <CardTitle>Files</CardTitle>
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => fileInputRef.current?.click()}
-                        >
-                            <Upload className="mr-1 h-3.5 w-3.5" /> Upload
-                        </Button>
+                        <div className="flex items-center gap-2">
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                aria-label="Add text document"
+                                onClick={() => setAddingText((v) => !v)}
+                            >
+                                <FileText className="mr-1 h-3.5 w-3.5" /> Add text
+                            </Button>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => fileInputRef.current?.click()}
+                            >
+                                <Upload className="mr-1 h-3.5 w-3.5" /> Upload
+                            </Button>
+                        </div>
                         <input
                             ref={fileInputRef}
                             type="file"
@@ -241,6 +278,43 @@ export function ProjectDetail({
                         />
                     </CardHeader>
                     <CardContent className="flex flex-col gap-1">
+                        {addingText && (
+                            <div className="flex flex-col gap-2 rounded-md border border-border/50 p-2">
+                                <Input
+                                    value={textTitle}
+                                    placeholder="Title"
+                                    onChange={(e) => setTextTitle(e.target.value)}
+                                />
+                                <Textarea
+                                    value={textBody}
+                                    placeholder="Paste or type text…"
+                                    rows={4}
+                                    onChange={(e) => setTextBody(e.target.value)}
+                                />
+                                <div className="flex justify-end gap-2">
+                                    <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        aria-label="Cancel add text"
+                                        onClick={() => {
+                                            setAddingText(false);
+                                            setTextTitle("");
+                                            setTextBody("");
+                                        }}
+                                    >
+                                        <X className="mr-1 h-3.5 w-3.5" /> Cancel
+                                    </Button>
+                                    <Button
+                                        size="sm"
+                                        aria-label="Save text document"
+                                        disabled={!textTitle.trim() || !textBody.trim()}
+                                        onClick={() => void saveText()}
+                                    >
+                                        <Check className="mr-1 h-3.5 w-3.5" /> Save
+                                    </Button>
+                                </div>
+                            </div>
+                        )}
                         {docs.length === 0 && (
                             <p className="text-xs text-muted-foreground">
                                 No files yet. PDFs, Markdown, and plain text

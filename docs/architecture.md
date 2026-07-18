@@ -195,7 +195,9 @@ session creation and the session can override the permission level afterward.
    system prompt/tools; the stable prefix (system + tools) renders first so caching
    actually hits.
 5. **Retrieval, not stuffing** — PDFs and documents live in SQLite + FTS5 and reach
-   the model through `search_documents`, never inlined wholesale.
+   the model through `search_documents`, never inlined wholesale. Project files
+   (uploaded or pasted as plain text via the projects UI) enter chats only through
+   these retrieval tools — the same guarantee, regardless of how the text arrived.
 
 ### Multimodal
 
