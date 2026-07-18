@@ -1,14 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { Pencil, Play, Plus, Trash2 } from "lucide-react";
 import * as automationsRepo from "@/db/repo/automations";
-import { listPipelines, listPipelineSteps, listRuns } from "@/db/repo/pipelines";
-import { getAgent } from "@/db/repo/agents";
-import { listGrants, listLevels } from "@/db/repo/permissions";
+import { listPipelines, listRuns } from "@/db/repo/pipelines";
+import { listLevels } from "@/db/repo/permissions";
 import { listProjects } from "@/db/repo/projects";
 import { runAutomation } from "@/ai/automations/run";
 import { appFetch } from "@/ai/providers/appFetch";
-import { TOOL_CATALOG } from "@/ai/tools/catalog";
-import { toScopedGrant } from "@/ai/permissions/engine";
+import { ungrantedTools } from "@/ai/permissions/preflight";
 import { useRuntime } from "@/app/runtime";
 import { PermissionLevelSelect } from "@/components/PermissionLevelSelect";
 import { Button } from "@/components/ui/button";
@@ -16,7 +14,6 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { agentToolNames } from "@/lib/schemas";
 import type {
     Automation,
     PermissionLevel,
@@ -30,32 +27,6 @@ import { TemplateChips } from "./PipelinesTab";
 import { TemplateEditor } from "./TemplateEditor";
 
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-
-/**
- * Tools the pipeline's agents can call that the chosen level does not grant.
- * Unattended runs auto-deny those — surface them before the user saves.
- */
-async function ungrantedTools(
-    pipelineId: string,
-    levelId: string | null,
-): Promise<string[]> {
-    const steps = await listPipelineSteps(pipelineId);
-    const used = new Set<string>();
-    for (const step of steps) {
-        try {
-            for (const t of agentToolNames(await getAgent(step.agent_id))) used.add(t);
-        } catch {
-            // deleted agent or bad tools_json — the run itself will surface that
-        }
-    }
-    const grants = levelId ? (await listGrants(levelId)).map(toScopedGrant) : [];
-    const accessOf = new Map(TOOL_CATALOG.map((t) => [t.name, t.access]));
-    return [...used].filter((name) => {
-        const access = accessOf.get(name);
-        if (!access) return true;
-        return !grants.some((g) => g.tool === name && g.access === access);
-    });
-}
 
 export function AutomationsTab() {
     const { settings } = useRuntime();

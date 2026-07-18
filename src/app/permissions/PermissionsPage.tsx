@@ -96,6 +96,12 @@ function LevelCard({
     const addGrant = async () => {
         setError(null);
         try {
+            if (scopeType !== "any" && !scopeValue.trim())
+                throw new Error(
+                    scopeType === "doc_folder"
+                        ? "a folder-scoped grant needs a folder (e.g. /school)"
+                        : "a domain-scoped grant needs a domain (e.g. example.com)",
+                );
             await repo.addGrant({
                 levelId: level.id,
                 tool,

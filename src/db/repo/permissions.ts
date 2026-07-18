@@ -1,5 +1,6 @@
 import { getDb } from "../client";
 import { newId, now } from "@/lib/ids";
+import { TOOL_CATALOG } from "@/ai/tools/catalog";
 import {
     permissionGrantSchema,
     permissionLevelSchema,
@@ -12,6 +13,7 @@ import {
 /** Stable ids so seeding is idempotent and presets can reference them. */
 export const BUILTIN_LEVELS = {
     readDocuments: "lvl_read_documents",
+    readsOnly: "lvl_reads_only",
 } as const;
 
 export async function seedBuiltinLevels(): Promise<void> {
@@ -37,6 +39,27 @@ export async function seedBuiltinLevels(): Promise<void> {
             BUILTIN_LEVELS.readDocuments,
         ],
     );
+
+    await getDb().execute(
+        `INSERT OR IGNORE INTO permission_levels (id, name, description, is_builtin, created_at)
+     VALUES (?, ?, ?, 1, ?)`,
+        [
+            BUILTIN_LEVELS.readsOnly,
+            "Reads only",
+            "Every read tool runs without asking; anything that writes still asks.",
+            t,
+        ],
+    );
+    // One grant per read tool, derived from the catalog so new read tools are
+    // covered on the next boot automatically.
+    for (const entry of TOOL_CATALOG) {
+        if (entry.access !== "read") continue;
+        await getDb().execute(
+            `INSERT OR IGNORE INTO permission_grants (id, level_id, tool, access, scope_type, scope_value)
+         VALUES (?, ?, ?, 'read', 'any', NULL)`,
+            [`grt_reads_only_${entry.name}`, BUILTIN_LEVELS.readsOnly, entry.name],
+        );
+    }
 }
 
 export async function createLevel(

@@ -205,8 +205,9 @@ describe("permission levels + grants", () => {
         await permissions.seedBuiltinLevels();
         await permissions.seedBuiltinLevels();
         const levels = await permissions.listLevels();
-        // seed test: only Read documents is a builtin row now; "Ask everything" is NULL
-        expect(levels.map((l) => l.name)).toEqual(["Read documents"]);
+        // seed test: builtin rows now cover "Read documents" and "Reads only";
+        // "Ask everything" is NULL (no row).
+        expect(levels.map((l) => l.name)).toEqual(["Read documents", "Reads only"]);
 
         const grants = await permissions.listGrants(
             permissions.BUILTIN_LEVELS.readDocuments,

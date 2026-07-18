@@ -4,6 +4,7 @@ import * as pipelinesRepo from "@/db/repo/pipelines";
 import { listAgents } from "@/db/repo/agents";
 import { listLevels, listGrants } from "@/db/repo/permissions";
 import { toScopedGrant } from "@/ai/permissions/engine";
+import { ungrantedTools } from "@/ai/permissions/preflight";
 import { PermissionContext } from "@/ai/tools/context";
 import { buildPipelineRuntime } from "@/ai/agents/runtime";
 import { runPipeline } from "@/ai/pipelines/runner";
@@ -46,6 +47,9 @@ export function PipelinesTab() {
         null,
     );
     const [error, setError] = useState<string | null>(null);
+    const [ungrantedByPipeline, setUngrantedByPipeline] = useState<
+        Record<string, string[]>
+    >({});
 
     const reload = useCallback(async () => {
         setPipelines(await pipelinesRepo.listPipelines());
@@ -55,6 +59,22 @@ export function PipelinesTab() {
     useEffect(() => {
         void reload();
     }, [reload]);
+
+    useEffect(() => {
+        let stale = false;
+        void Promise.all(
+            pipelines.map(async (p) => [p.id, await ungrantedTools(p.id, levelId || null)] as const),
+        )
+            .then((entries) => {
+                if (!stale) setUngrantedByPipeline(Object.fromEntries(entries));
+            })
+            .catch(() => {
+                if (!stale) setUngrantedByPipeline({});
+            });
+        return () => {
+            stale = true;
+        };
+    }, [levelId, pipelines]);
 
     const refreshRuns = useCallback(async (pipelineId: string) => {
         setRunsFor(pipelineId);
@@ -170,6 +190,13 @@ export function PipelinesTab() {
                         </button>
                         {runsFor === p.id && (
                             <RunHistory runs={runs} pipelineName={p.name} />
+                        )}
+                        {(ungrantedByPipeline[p.id] ?? []).length > 0 && (
+                            <p className="text-xs text-warning">
+                                With this level, unattended/denied tools:{" "}
+                                {ungrantedByPipeline[p.id]!.join(", ")} — approval
+                                cards will ask during manual runs.
+                            </p>
                         )}
                     </CardContent>
                 </Card>
