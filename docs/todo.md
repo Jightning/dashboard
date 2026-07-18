@@ -1,39 +1,26 @@
 # TODO
 
-## Shipped 2026-07-17 — Home & Polish round
+(Items planned in the current `plan.md` round — web-search trust, hourly 1-day
+view, paste-text documents, exo-sphere layers, Ollama setup, usage visibility,
+draft limits, hosting readiness — have been removed from this list; what
+remains is deliberately deferred to a future round.)
 
-- Automation research lookups fixed at the root: the permissions grant UI now
-  derives its tool dropdown from `TOOL_CATALOG` instead of a stale hardcoded
-  list, and the automation editor preflight-warns when the chosen level
-  leaves a pipeline's tools ungranted (unattended runs used to auto-deny
-  those silently).
-- Calendar: 1-day view alongside 7d/14d/month; manual event creation and
-  deletion (`events.source = "manual"`) via a quick-add form on the calendar.
-- Exo-sphere stays hidden at rest and fades in as the user scrolls out past
-  zoom ~0.95, fully visible by ~0.7 — no more clutter from older chats
-  crowding the view.
-- Agent visualization is back on category chat stars, subtler this time:
-  small satellite dots per agent (no tool sub-nodes), with agent chips on
-  the hover card.
-- New chats and notes inherit the project/category context they're created
-  from (sphere drill-in or the active sidebar filter); clicking a project
-  star navigates to that project's detail page; double-clicking a chat title
-  renames it in place.
-- Home is a launcher: a bookmarks strip, quick capture (task or note without
-  leaving Home), recent chats, and clickable stat tiles/cards.
-- Status bar gained live tappable readouts — tasks due today, next
-  automation run — plus the model chip now opens Settings.
-- Refresh keeps your place: nav position (page, tab, open chat) persists to
-  localStorage, and per-session chat composer drafts survive reload too.
-- Tasks tab gained due-window filters (Overdue / Today / This week) that
-  compose with the category chips, plus a "show completed" section with
-  reopen/delete.
+## Planner
 
-Deliberately not done this round (see plan.md's "Deliberately not done"):
-task quick-add drafts aren't persisted — only chat composer drafts are, since
-a half-typed chat message is expensive to retype and a task title isn't;
-manual events don't get their own `category_id` — they color by kind, and
-category filtering of events still flows through the course link.
+- Sources & schedules in planner should be moved to its own School tab (or workspace, whatever is best for UX considering not all users go to school, maybe instead a tab named "Schedule") where classes can be managed (each course getting added as it's own projects under an auto managed schools category, with its own files, class schedule that appears on the calendar, and so on).
+
+## Permissions
+
+- There should also be the ability to create "private" instances of things (maybe a category could have the ability to be tagged as private, same thing with notes, tasks, and so on). These private instances shouldn't be read by external things no matter what, only chats/agents that exist within these private instances.
+
+## Agents
+
+- Automations and pipelines should also allow the inclusion of uploaded files into their respective contexts.
+- The agents interface should optimize for prompt engineering: work out the best way to automate prompt engineering inside the dashboard — study how the user actually phrases requests (chat history is local and searchable) alongside common prompt-engineering optimizations (role/persona framing, explicit output format, few-shot examples, constraint lists, step decomposition), and propose where the dashboard should apply them automatically (e.g. a "refine my prompt" pass before send, template suggestions in the pipeline editor, or per-agent instruction tune-ups driven by past run quality).
+
+## Home
+
+- Ability to re-arrange the home menu, and to add widgets. This way the home menu can be customized however I'd like (from the user's end).
 
 ## Possible future problems (not urgent)
 

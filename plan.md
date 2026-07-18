@@ -1,1407 +1,822 @@
-# Home & Polish Implementation Plan — todo round of 2026-07-17
+# Trust & Hosting Implementation Plan — todo round of 2026-07-17 (evening)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Work through `docs/todo.md`'s current round: fix the automation-permissions bug at its root (the grant UI's stale tool list), give the calendar a 1-day view and manual event creation, hide the exo-sphere until the user scrolls out, restore per-chat agent satellites subtly, make new chats/notes inherit the project/category context they're created from, turn Home into a launcher (bookmarks, quick capture, recent chats), give the status bar live tappable readouts, and survive page refresh (nav position + chat drafts).
+**Goal:** Make web search trustworthy end-to-end (a builtin "Reads only" level that can't be misconfigured, an exhaustive engine test, scoped-grant validation, preflight on manual runs), bound chat-draft storage (size cap, TTL, pruning), give the 1-day calendar a full hourly timeline, let projects accept pasted-text documents, rebuild the exo-sphere as unlimited pull-in layers with the inner sphere fading on zoom-out, finish the Ollama story (connection test + live model list + hosted guidance), surface provider usage so free-tier limits stop being a surprise, and make the repo deployable to a real host (Cloudflare Pages: headers + a production proxy function + docs).
 
-**Architecture:** No schema changes at all this round — every feature rides on existing tables (`events.source` distinguishes manual events; persistence uses namespaced localStorage, which both targets have). The permissions fix replaces a hardcoded `KNOWN_TOOLS` list with the `TOOL_CATALOG` single source of truth and adds an automation "preflight" warning that names ungranted tools before an unattended run can silently auto-deny them. Sphere changes are pure draw-pass math (a zoom-driven reveal factor) plus a builder option — the perf contract is untouched. Context-aware creation threads a `creationCategoryId` through ChatWorkspace and adds `NavTarget.projectId` so a sphere project-star click lands in the project detail (where project chats already file correctly).
+**Scope decision (per the user's instruction to focus):** four todo items are deliberately **deferred to the next round** and stay in `docs/todo.md`: the School/Schedule tab restructure (courses→projects is an IA redesign deserving its own round), private instances (a cross-cutting privacy model), file attachments in automation/pipeline contexts, and home-menu widgets/rearranging (a customization framework). Everything else in the todo is planned here.
 
-**Tech Stack:** unchanged — React 19, TypeScript strict, Tailwind v4, motion, lucide-react, zod, SQLite (three clients), Vercel AI SDK. **No new dependencies, no new migrations.**
+**Architecture:** Zero migrations again — the builtin level is seed data, drafts live in localStorage, usage reads the existing per-message token columns, the exo layers are pure draw-pass math, and hosting adds only static/function files outside `src/`. Hosting targets **Cloudflare Pages** (free tier): a `public/_headers` file supplies the COOP/COEP headers OPFS needs (GitHub Pages can't set headers), and a `functions/__proxy.ts` Pages Function serves the same `/__proxy?url=` contract the Vite dev middleware serves, so `wrapWebFetch` works unchanged in production.
+
+**Diagnosis notes (verified while planning):**
+- DuckDuckGo's HTML endpoint answers plain Node fetches from this machine — 10 results, no UA needed. The search *network* path is healthy; the reported "denied" is the permission engine.
+- Chat delegation tools (`ask_*_agent`) are not gated — the deny originates at the web tool's own gate. Most likely cause: a hand-built grant that never matches (the UI accepts a `url_domain`/`doc_folder` grant with an **empty scope value**, which `grantMatches` can never satisfy), or a level missing `search_web` (only grantable since this morning). Task 1 removes the whole failure class rather than guessing: a seeded always-correct level, validation that rejects value-less scoped grants, and a test that pins every read tool to "allow" under that level.
+
+**Tech Stack:** unchanged; **no new dependencies, no migrations**. Cloudflare deployment uses the dashboard git integration — no wrangler.
 
 ## Global Constraints
 
-- **Branch prerequisite:** `feat/categories-signal` is complete and pending the user's QA/merge decision. Do not start this plan on top of it blind: **merge it first** (after QA), then `git checkout -b feat/home-signal` from main. If QA finds bugs, fix them on the categories branch before merging. The uncommitted `docs/todo.md` edits in the working tree are the user's new todo round — commit them together with this plan file as the new branch's first commit.
-- **$0 budget:** no new npm packages, no services, no keys.
-- **No migrations:** nothing in this round changes the schema. If an implementer thinks a task needs a column, stop and report BLOCKED — the plan chose designs that don't.
-- **Perf contract (WSLg):** no SVG filters, no `backdrop-blur`, no per-frame allocations in HUD components; SVG attribute writes inside the one rAF draw pass only. The exo-reveal factor is scalar math computed once per frame.
-- **localStorage keys** are namespaced `hugh.*` and versioned (`hugh.nav.v1`, `hugh.draft.<sessionId>`). Every read is wrapped so corrupt/missing values fall back cleanly — persistence must never break boot.
-- **AI must never break the app** (unchanged from last round) — nothing here touches that contract, don't regress it.
-- **Gates:** `npm run typecheck` and `npm test` must pass before every commit.
-- **UI verification:** the Playwright MCP plugin is now installed and configured for bundled chromium (`--browser chromium`; takes effect after a `/reload-plugins`). UI tasks get a browser-verification step against `npm run dev` (port 1420 — if it's already in use, the user's own dev server is running; drive that one). If the browser genuinely cannot launch in this environment, fall back to flagging the step for a human pass — never claim visual verification you didn't perform.
-- **Style:** 4-space indent, double quotes, `cn()` for class merging, repos throw on missing rows, `void` prefix for fire-and-forget promises — match the file you are editing.
+- **Branch:** `feat/home-signal` is merged (or pending merge — if unmerged when this starts, merge it first after the user's sign-off). Then `git checkout -b feat/trust-hosting` from main; commit this plan + the trimmed `docs/todo.md` as the first commit.
+- **$0 budget:** no new npm packages, no paid services. Cloudflare Pages free tier only; deploy is documented, not executed (no credentials here).
+- **No migrations.** If a task seems to need a column, stop and report BLOCKED.
+- **Perf contract (WSLg):** no SVG filters, no backdrop-blur, no per-frame allocations in HUD components; the layer/pull-in math is scalar, computed inside the existing single rAF pass.
+- **localStorage stays bounded and guarded:** every read tolerates garbage; writes are try/caught; Task 2's caps make the draft namespace self-limiting.
+- **`functions/` and `public/` are host-target files** — they are not part of the app's src style rules, but `functions/__proxy.ts` must typecheck standalone (structural types, no `@cloudflare/workers-types` dep; exclude the dir in tsconfig if the sweep picks it up).
+- **Gates:** `npm run typecheck` and `npm test` before every commit; `npm run build` must also pass in the hosting task (it is the deploy artifact).
+- **Execution mode (per user):** streamlined — no per-task reviewer subagents; implementers self-review hard, the controller spot-checks diffs, one final whole-branch review at the end. Browser checks are deferred to the user unless urgent.
+- **Style:** 4-space indent, double quotes, `cn()`, repos throw on missing rows, `void` for fire-and-forget — match the file you edit.
 
 ## File Structure (what exists after the plan)
 
 ```txt
-src/app/permissions/PermissionsPage.tsx   MOD  tool dropdown derives from TOOL_CATALOG
-src/ai/tools/catalog.test.ts              MOD  builtin-agent tool coverage invariant
-src/app/agents/AutomationsTab.tsx         MOD  preflight "this level leaves X ungranted" warning
-src/db/repo/events.ts                     MOD  deleteEvent(id)
-src/db/repo/events.test.ts                NEW  manual create/delete round-trip
-src/app/planner/calendarItems.ts          MOD  CalendarItem gains refId + manual
-src/app/planner/calendarItems.test.ts     MOD  manual-event case
-src/app/planner/CalendarTab.tsx           MOD  "1d" mode; QuickEvent form; delete on manual chips
-src/app/planner/TasksTab.tsx              MOD  due-window filters + completed section
-src/components/hud/NetworkSphere.tsx      MOD  exo reveal factor (hidden at zoom 1)
-src/components/hud/networkData.ts         MOD  attachAgent opts; subtle satellites in category view
-src/components/hud/networkData.test.ts    MOD  satellite cases
-src/app/chat/ChatWorkspace.tsx            MOD  creationCategoryId; project-star click navigates;
-                                               onSessionOpened; lifted categoryFilter
-src/app/chat/InstancesSidebar.tsx         MOD  categoryFilter lifted to props
-src/app/Sidebar.tsx                       MOD  NavTarget gains projectId?
-src/app/Shell.tsx                         MOD  nav persistence, onTabChange plumbing, home/status wiring
-src/app/agents/AgentsPage.tsx             MOD  onNavigate + onTabChange threading
-src/app/notes/NotesPage.tsx               MOD  onTabChange; new notes inherit category filter
-src/app/planner/PlannerPage.tsx           MOD  onTabChange
-src/app/categories/CategoriesPage.tsx     MOD  initialProjectId deep-link (opens ProjectDetail)
-src/app/categories/CategoryDetail.tsx     MOD  "New note here" button
-src/app/home/HomePage.tsx                 MOD  bookmarks strip, quick capture, recent chats, clickable tiles
-src/components/hud/StatusReadouts.tsx     NEW  due-today + next-automation readouts (clickable)
-src/lib/navPersist.ts                     NEW  load/save NavTarget with validation
-src/lib/navPersist.test.ts                NEW
-src/components/chat/Composer.tsx          MOD  per-session draft persistence (draftKey prop)
-docs/todo.md                              MOD  check off this round
-docs/architecture.md                      MOD  one line: manual events, status readouts
+src/db/repo/permissions.ts             MOD  seed "Reads only" builtin level from TOOL_CATALOG
+src/db/repo/permissions.test.ts        NEW? (or extend existing engine tests' file) reads-only coverage
+src/app/permissions/PermissionsPage.tsx MOD  reject scoped grants without a value
+src/ai/permissions/preflight.ts        NEW  ungrantedTools moved here (shared)
+src/app/agents/AutomationsTab.tsx      MOD  import preflight from shared module
+src/app/agents/PipelinesTab.tsx        MOD  preflight warning on manual-run level select
+src/lib/drafts.ts                      NEW  bounded draft load/save/prune (size cap, TTL, count cap)
+src/lib/drafts.test.ts                 NEW
+src/components/chat/Composer.tsx       MOD  use drafts.ts instead of raw localStorage
+src/app/chat/ChatWorkspace.tsx         MOD  draft prune on delete via drafts.ts
+src/app/planner/CalendarTab.tsx        MOD  HourDay timeline for the 1-day view
+src/components/hud/networkData.ts      MOD  exo layer assignment (shell per layer)
+src/components/hud/networkData.test.ts MOD  layer cases
+src/components/hud/NetworkSphere.tsx   MOD  staged layer reveal, pull-in, inner fade
+src/app/projects/ProjectDetail.tsx     MOD  "Add text" document creation
+src/db/repo/documents.ts               MOD  createTextDocument (if no equivalent exists)
+src/app/settings/SettingsPage.tsx      MOD  Ollama test-connection + model list; Usage card
+src/db/repo/usage.ts                   MOD? (only if usageByDay's shape needs a provider column)
+public/_headers                        NEW  COOP/COEP for OPFS on the host
+functions/__proxy.ts                   NEW  Cloudflare Pages Function mirroring the dev proxy
+docs/hosting.md                        NEW  deploy guide + hosted-mode caveats
+docs/todo.md                           MOD  solved items removed; deferred items kept
+docs/architecture.md                   MOD  hosting section pointer; Reads-only level
 ```
 
-Deliberately **not** done (YAGNI, carried or new):
-- Events don't get `category_id` — manual events color by kind; category filtering of events still flows through the course link. Revisit if manual events pile up.
-- Task quick-add drafts aren't persisted (only chat composer drafts) — a half-typed task title is cheap to retype; a half-typed chat message isn't.
-- The "possible future problems" section of todo.md (bookmarks/snippets category_id, Uncategorized drill-in, flashcard categories) stays deliberately unbuilt, per its own text.
-- CategoryDetail's "New note here" navigates to Notes without auto-selecting the new note (NavTarget has no noteId; not worth adding for one hop).
+Deliberately **deferred** (kept in `docs/todo.md` for the next round): School/Schedule tab (courses→projects restructure), private instances, automation/pipeline file inclusion, home widgets. Deliberately **not** done: no server-side key handling for the hosted build (keys remain per-visitor, client-side — documented); no search-provider fallback beyond DDG (verified working; revisit only if it starts blocking).
 
 ---
 
-### Task 1: Automation research fix — grantable tools from TOOL_CATALOG + preflight warning
-
-**Root cause (verified):** `PermissionsPage.tsx`'s `KNOWN_TOOLS` is a stale hardcoded 7-tool list. `search_web` — the Research agent's first move since the last round — plus every task/career/study tool **cannot be granted at all**. Unattended automation runs auto-deny anything ungranted (`createAutoDenyPermissions`, src/ai/automations/run.ts:26-29), so "research lookups" always fail no matter what level the user builds. Deriving the dropdown from `TOOL_CATALOG` fixes it for good; a coverage test pins the invariant; a preflight warning in the automation editor makes the next gap visible instead of silent.
+### Task 1: Web search you can trust — "Reads only" level, exhaustive test, grant validation, manual-run preflight
 
 **Files:**
-- Modify: `src/app/permissions/PermissionsPage.tsx` (KNOWN_TOOLS, ~line 11; grant form, ~lines 96, 183-190)
-- Modify: `src/ai/tools/catalog.test.ts`
-- Modify: `src/app/agents/AutomationsTab.tsx` (editor form)
+- Modify: `src/db/repo/permissions.ts` (seed the level)
+- Create: `src/db/repo/permissions.test.ts` (if absent — else extend the engine's test file)
+- Modify: `src/app/permissions/PermissionsPage.tsx` (scoped-grant validation)
+- Create: `src/ai/permissions/preflight.ts` (move `ungrantedTools` out of AutomationsTab)
+- Modify: `src/app/agents/AutomationsTab.tsx`, `src/app/agents/PipelinesTab.tsx`
 
 **Interfaces:**
-- Consumes: `TOOL_CATALOG` from `@/ai/tools/catalog`; `listPipelineSteps` from `@/db/repo/pipelines`; `getAgent` from `@/db/repo/agents`; `agentToolNames` from `@/lib/schemas`; `listGrants` from `@/db/repo/permissions`; `toScopedGrant` from `@/ai/permissions/engine`.
-- Produces: no new exports (the preflight helper stays module-private in AutomationsTab).
+- Produces: `BUILTIN_LEVELS.readsOnly = "lvl_reads_only"`; `ungrantedTools(pipelineId: string, levelId: string | null): Promise<string[]>` exported from `@/ai/permissions/preflight`.
 
-- [ ] **Step 1: Failing test — extend `src/ai/tools/catalog.test.ts`**
+- [ ] **Step 1: Failing test — reads-only coverage**
 
-Add (reusing the file's existing imports/setup style; it currently tests the catalog shape):
-
-```ts
-import { beforeEach, afterEach, describe, expect, it } from "vitest";
-import { createTestDbClient } from "@/db/testClient";
-import { setDb } from "@/db/client";
-import { seedBuiltinAgents } from "@/db/repo/agents";
-import { listAgents } from "@/db/repo/agents";
-import { agentToolNames } from "@/lib/schemas";
-import { TOOL_CATALOG } from "./catalog";
-
-describe("catalog covers builtin agents", () => {
-    let db: ReturnType<typeof createTestDbClient>;
-    beforeEach(() => {
-        db = createTestDbClient();
-        setDb(db);
-    });
-    afterEach(() => db.close());
-
-    it("every builtin agent tool is a catalog entry (and therefore grantable)", async () => {
-        await seedBuiltinAgents();
-        const catalog = new Set(TOOL_CATALOG.map((t) => t.name));
-        for (const agent of await listAgents()) {
-            for (const tool of agentToolNames(agent)) {
-                expect(catalog, `${agent.name} uses ungrantable tool`).toContain(tool);
-            }
-        }
-    });
-});
-```
-
-(Merge into the existing `catalog.test.ts` — keep its current tests; if it has no DB setup today, add this as a second describe with its own hooks.)
-
-- [ ] **Step 2: Run it — expect PASS, then break the invariant to prove the test bites**
-
-Run: `npx vitest run src/ai/tools/catalog.test.ts`
-This test passes already (the catalog does contain search_web — the *UI list* is what's stale). To confirm it guards the invariant, temporarily remove the search_web line from TOOL_CATALOG, re-run (expect FAIL), restore it. The real RED for this task is the UI fix below, which has no unit test — the browser step verifies it.
-
-- [ ] **Step 3: Fix `PermissionsPage.tsx`**
-
-Delete the `KNOWN_TOOLS` const. Import the catalog:
+In the permissions repo test file (create with the standard testClient hooks if absent):
 
 ```ts
 import { TOOL_CATALOG } from "@/ai/tools/catalog";
+import { evaluateToolCall, SessionGrants, toScopedGrant } from "@/ai/permissions/engine";
+import { webScopeResolvers } from "@/ai/tools/web";
+import { BUILTIN_LEVELS, listGrants, seedBuiltinLevels } from "./permissions";
+
+describe("Reads only builtin level", () => {
+    it("auto-allows every read tool in the catalog, including real web scopes", async () => {
+        await seedBuiltinLevels();
+        const levelGrants = (await listGrants(BUILTIN_LEVELS.readsOnly)).map(toScopedGrant);
+        const sessionGrants = new SessionGrants();
+        for (const entry of TOOL_CATALOG) {
+            if (entry.access !== "read") continue;
+            // Representative scopes per type; web tools use their REAL resolvers.
+            const scope =
+                entry.name === "search_web"
+                    ? await webScopeResolvers.search_web!({ query: "x" })
+                    : entry.name === "fetch_url"
+                      ? await webScopeResolvers.fetch_url!({ url: "https://example.com/a" })
+                      : { access: "read" as const, scopeType: "doc_folder" as const, scopeValue: "/anywhere" };
+            expect(
+                evaluateToolCall({ tool: entry.name, scope, levelGrants, sessionGrants }),
+                `${entry.name} should auto-allow under Reads only`,
+            ).toBe("allow");
+        }
+    });
+
+    it("write tools still ask under Reads only", async () => {
+        await seedBuiltinLevels();
+        const levelGrants = (await listGrants(BUILTIN_LEVELS.readsOnly)).map(toScopedGrant);
+        expect(
+            evaluateToolCall({
+                tool: "write_note",
+                scope: { access: "write", scopeType: "doc_folder", scopeValue: "/x" },
+                levelGrants,
+                sessionGrants: new SessionGrants(),
+            }),
+        ).toBe("ask");
+    });
+
+    it("re-seeding is idempotent", async () => {
+        await seedBuiltinLevels();
+        const before = (await listGrants(BUILTIN_LEVELS.readsOnly)).length;
+        await seedBuiltinLevels();
+        expect((await listGrants(BUILTIN_LEVELS.readsOnly)).length).toBe(before);
+    });
+});
 ```
 
-In `LevelCard`, the tool state and select become catalog-driven, and picking a tool defaults `access` to the tool's declared access (users can still override):
+(Adapt the non-web representative scope if some read tool resolves `any` — check each tool module's resolver; the point is the REAL scope type each tool emits must match the grant. If a tool's resolver is exported, prefer calling it like the web ones.)
 
-```tsx
-    const [tool, setTool] = useState(TOOL_CATALOG[0]!.name);
-```
+Run: expect FAIL (`BUILTIN_LEVELS.readsOnly` missing).
 
-```tsx
-                        <Select
-                            aria-label="Tool"
-                            value={tool}
-                            onChange={(e) => {
-                                setTool(e.target.value);
-                                const entry = TOOL_CATALOG.find(
-                                    (t) => t.name === e.target.value,
-                                );
-                                if (entry) setAccess(entry.access);
-                            }}
-                        >
-                            {TOOL_CATALOG.map((t) => (
-                                <option key={t.name} value={t.name}>
-                                    {t.label} ({t.name})
-                                </option>
-                            ))}
-                        </Select>
-```
+- [ ] **Step 2: Seed the level in `permissions.ts`**
 
-(Adapt to the exact JSX around line 183 — only the options source and the onChange body change.)
-
-- [ ] **Step 4: Preflight warning in `AutomationsTab.tsx`'s editor**
-
-Inside the editor component (the one holding `form`), add a module-private helper and an effect that recomputes when the pipeline or level changes:
+Add to `BUILTIN_LEVELS`: `readsOnly: "lvl_reads_only",`. In `seedBuiltinLevels()`, after the existing seeds:
 
 ```ts
-/**
- * Tools the pipeline's agents can call that the chosen level does not grant.
- * Unattended runs auto-deny those — surface them before the user saves.
- */
-async function ungrantedTools(
-    pipelineId: string,
-    levelId: string | null,
-): Promise<string[]> {
-    const steps = await listPipelineSteps(pipelineId);
-    const used = new Set<string>();
-    for (const step of steps) {
-        try {
-            for (const t of agentToolNames(await getAgent(step.agent_id))) used.add(t);
-        } catch {
-            // deleted agent or bad tools_json — the run itself will surface that
-        }
+    await getDb().execute(
+        `INSERT OR IGNORE INTO permission_levels (id, name, description, is_builtin, created_at)
+     VALUES (?, ?, ?, 1, ?)`,
+        [
+            BUILTIN_LEVELS.readsOnly,
+            "Reads only",
+            "Every read tool runs without asking; anything that writes still asks.",
+            t,
+        ],
+    );
+    // One grant per read tool, derived from the catalog so new read tools are
+    // covered on the next boot automatically.
+    for (const entry of TOOL_CATALOG) {
+        if (entry.access !== "read") continue;
+        await getDb().execute(
+            `INSERT OR IGNORE INTO permission_grants (id, level_id, tool, access, scope_type, scope_value)
+         VALUES (?, ?, ?, 'read', 'any', NULL)`,
+            [`grt_reads_only_${entry.name}`, BUILTIN_LEVELS.readsOnly, entry.name],
+        );
     }
-    const grants = levelId ? (await listGrants(levelId)).map(toScopedGrant) : [];
-    const accessOf = new Map(TOOL_CATALOG.map((t) => [t.name, t.access]));
-    return [...used].filter((name) => {
-        const access = accessOf.get(name);
-        if (!access) return true;
-        return !grants.some((g) => g.tool === name && g.access === access);
+```
+
+Import `TOOL_CATALOG` from `@/ai/tools/catalog` (verify no import cycle — catalog imports tool modules and the engine types, never the repos' callers; if a cycle appears, report BLOCKED rather than inlining a copy). Run the new tests → PASS. Existing DBs pick the level up on next boot (`seedBuiltinLevels` runs every bootstrap, `INSERT OR IGNORE`).
+
+- [ ] **Step 3: Reject value-less scoped grants in `PermissionsPage.tsx`**
+
+In `addGrant`, before calling the repo:
+
+```ts
+            if (scopeType !== "any" && !scopeValue.trim())
+                throw new Error(
+                    scopeType === "doc_folder"
+                        ? "a folder-scoped grant needs a folder (e.g. /school)"
+                        : "a domain-scoped grant needs a domain (e.g. example.com)",
+                );
+```
+
+(Inside the existing try so it lands in the error state.) This closes the "grant that can never match" trap — the likely cause of the reported denials.
+
+- [ ] **Step 4: Share the preflight**
+
+Create `src/ai/permissions/preflight.ts` and move `ungrantedTools` (and its imports) there verbatim from AutomationsTab; export it; AutomationsTab imports it. In `PipelinesTab`, add the same stale-guarded effect keyed on `[runsFor-independent]` — concretely: state `ungranted`, an effect watching `[levelId]` that, when a pipeline is about to run, is not enough — simplest correct UX: compute per-pipeline on demand next to the Run button is noisy; instead compute once for the SELECTED level against the pipeline being run, at click time is too late to warn. Do this: an effect watching `[levelId, pipelines]` that maps every pipeline id → ungranted list (`Promise.all`), stored as `Record<string, string[]>`; render the warning line inside each pipeline's Card when non-empty:
+
+```tsx
+                        {(ungrantedByPipeline[p.id] ?? []).length > 0 && (
+                            <p className="text-xs text-warning">
+                                With this level, unattended/denied tools:{" "}
+                                {ungrantedByPipeline[p.id]!.join(", ")} — approval
+                                cards will ask during manual runs.
+                            </p>
+                        )}
+```
+
+(Use the same warning color AutomationsTab's line uses.)
+
+- [ ] **Step 5: Gates + commit**
+
+`npm run typecheck && npm test` → PASS.
+
+```bash
+git add src/db/repo/permissions.ts src/db/repo/permissions.test.ts src/app/permissions/PermissionsPage.tsx src/ai/permissions/preflight.ts src/app/agents/AutomationsTab.tsx src/app/agents/PipelinesTab.tsx
+git commit -m "feat: builtin Reads-only level, scoped-grant validation, shared preflight"
+```
+
+(User check later: pick "Reads only" on a Research chat → search runs with zero approval cards.)
+
+---
+
+### Task 2: Bounded chat drafts — size cap, TTL, pruning
+
+**Files:**
+- Create: `src/lib/drafts.ts`, `src/lib/drafts.test.ts`
+- Modify: `src/components/chat/Composer.tsx`, `src/app/chat/ChatWorkspace.tsx`
+
+**Interfaces:**
+- Produces: `loadDraft(sessionId): string`, `saveDraft(sessionId, text): void`, `removeDraft(sessionId): void`, `pruneDrafts(): void` from `@/lib/drafts`. Constants: `MAX_DRAFT_CHARS = 8_000`, `DRAFT_TTL_MS = 14 * 86_400_000`, `MAX_DRAFTS = 20`.
+
+- [ ] **Step 1: Failing tests — `src/lib/drafts.test.ts`** (reuse navPersist.test.ts's localStorage stub pattern):
+
+```ts
+describe("bounded drafts", () => {
+    it("round-trips and accepts legacy plain-string values", () => {
+        saveDraft("ses_a", "hello");
+        expect(loadDraft("ses_a")).toBe("hello");
+        localStorage.setItem("hugh.draft.ses_old", "legacy text");
+        expect(loadDraft("ses_old")).toBe("legacy text");
     });
+
+    it("caps draft size", () => {
+        saveDraft("ses_big", "x".repeat(MAX_DRAFT_CHARS + 5));
+        expect(loadDraft("ses_big").length).toBe(MAX_DRAFT_CHARS);
+    });
+
+    it("expires drafts past the TTL", () => {
+        localStorage.setItem(
+            "hugh.draft.ses_stale",
+            JSON.stringify({ t: "old", at: Date.now() - DRAFT_TTL_MS - 1 }),
+        );
+        expect(loadDraft("ses_stale")).toBe("");
+        expect(localStorage.getItem("hugh.draft.ses_stale")).toBeNull();
+    });
+
+    it("prunes to the newest MAX_DRAFTS", () => {
+        for (let i = 0; i < MAX_DRAFTS + 5; i++) {
+            localStorage.setItem(
+                `hugh.draft.ses_${i}`,
+                JSON.stringify({ t: `d${i}`, at: i }),
+            );
+        }
+        pruneDrafts();
+        const remaining = Object.keys(localStorage._dump?.() ?? {}); // adapt to the stub
+        // newest MAX_DRAFTS survive; the 5 oldest (smallest at) are gone
+        expect(loadDraft("ses_0")).toBe("");
+        expect(loadDraft(`ses_${MAX_DRAFTS + 4}`)).toBe(`d${MAX_DRAFTS + 4}`);
+    });
+});
+```
+
+(The stub must support key enumeration — extend the navPersist stub with a backing Map the test can inspect, or assert via `loadDraft` results only, as the last two expects do; drop the `_dump` line if so.)
+
+- [ ] **Step 2: Implement `src/lib/drafts.ts`**
+
+```ts
+const PREFIX = "hugh.draft.";
+export const MAX_DRAFT_CHARS = 8_000;
+export const DRAFT_TTL_MS = 14 * 86_400_000;
+export const MAX_DRAFTS = 20;
+
+interface DraftEnvelope {
+    t: string;
+    at: number;
+}
+
+function parse(raw: string): DraftEnvelope {
+    try {
+        const v = JSON.parse(raw) as { t?: unknown; at?: unknown };
+        if (typeof v.t === "string" && typeof v.at === "number")
+            return { t: v.t, at: v.at };
+    } catch {
+        // legacy plain-string draft
+    }
+    return { t: raw, at: Date.now() };
+}
+
+/** Draft text for a session; "" when absent/expired. Expired keys are removed. */
+export function loadDraft(sessionId: string): string {
+    try {
+        const raw = localStorage.getItem(PREFIX + sessionId);
+        if (!raw) return "";
+        const env = parse(raw);
+        if (Date.now() - env.at > DRAFT_TTL_MS) {
+            localStorage.removeItem(PREFIX + sessionId);
+            return "";
+        }
+        return env.t;
+    } catch {
+        return "";
+    }
+}
+
+/** Persist (capped) or clear; prunes the namespace as a side effect. */
+export function saveDraft(sessionId: string, text: string): void {
+    try {
+        const key = PREFIX + sessionId;
+        if (!text) {
+            localStorage.removeItem(key);
+            return;
+        }
+        localStorage.setItem(
+            key,
+            JSON.stringify({ t: text.slice(0, MAX_DRAFT_CHARS), at: Date.now() }),
+        );
+        pruneDrafts();
+    } catch {
+        // best-effort
+    }
+}
+
+export function removeDraft(sessionId: string): void {
+    try {
+        localStorage.removeItem(PREFIX + sessionId);
+    } catch {
+        // best-effort
+    }
+}
+
+/** Drop expired drafts and everything beyond the newest MAX_DRAFTS. */
+export function pruneDrafts(): void {
+    try {
+        const entries: { key: string; at: number }[] = [];
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (!key?.startsWith(PREFIX)) continue;
+            const env = parse(localStorage.getItem(key) ?? "");
+            entries.push({ key, at: env.at });
+        }
+        const now = Date.now();
+        const dead = entries.filter((e) => now - e.at > DRAFT_TTL_MS);
+        const live = entries
+            .filter((e) => now - e.at <= DRAFT_TTL_MS)
+            .sort((a, b) => b.at - a.at);
+        for (const e of dead) localStorage.removeItem(e.key);
+        for (const e of live.slice(MAX_DRAFTS)) localStorage.removeItem(e.key);
+    } catch {
+        // best-effort
+    }
 }
 ```
 
-```tsx
-    const [ungranted, setUngranted] = useState<string[]>([]);
-    useEffect(() => {
-        if (!form.pipelineId) {
-            setUngranted([]);
-            return;
-        }
-        let stale = false;
-        void ungrantedTools(form.pipelineId, form.permissionLevelId ?? null)
-            .then((names) => {
-                if (!stale) setUngranted(names);
-            })
-            .catch(() => {
-                if (!stale) setUngranted([]);
-            });
-        return () => {
-            stale = true;
-        };
-    }, [form.pipelineId, form.permissionLevelId]);
-```
+(NOTE: the localStorage stub in the tests must implement `length` and `key(i)` for `pruneDrafts` — extend the stub accordingly.)
 
-Render below the permission-level select:
+- [ ] **Step 3: Swap the call sites**
 
-```tsx
-                {ungranted.length > 0 && (
-                    <p className="text-xs text-warning">
-                        Unattended runs deny anything not granted. This level
-                        leaves ungranted: {ungranted.join(", ")}. Add grants in
-                        Permissions or the run will skip those tools.
-                    </p>
-                )}
-```
+`Composer.tsx`: initial state uses `loadDraft(draftKey)`; the debounced effect and its flush-cleanup call `saveDraft(draftKey, text)` (which handles the empty→remove case — delete the inline try/catch blocks). `ChatWorkspace.tsx` `deleteInstance`: replace the inline `localStorage.removeItem(...)` with `removeDraft(session.id)`.
 
-(If the project has no `text-warning` token, use the same class the app uses for warning badges — check `Badge`'s `warning` tone and reuse its color.)
+- [ ] **Step 4: Gates + commit**
 
-- [ ] **Step 5: Gates + browser check + commit**
-
-Run: `npm run typecheck && npm test` — Expected: PASS.
-Browser (Playwright against dev server): Permissions page → a level's "add grant" tool dropdown lists all TOOL_CATALOG entries incl. "Search the web (search_web)"; grant it (read/any); Automations editor with a Research pipeline + that level shows no warning, with "Ask everything" (no level) shows the warning naming search_web/fetch_url.
+`npm run typecheck && npm test` → PASS.
 
 ```bash
-git add src/app/permissions/PermissionsPage.tsx src/ai/tools/catalog.test.ts src/app/agents/AutomationsTab.tsx
-git commit -m "fix: grants cover the whole tool catalog; automations preflight ungranted tools"
+git add src/lib/drafts.ts src/lib/drafts.test.ts src/components/chat/Composer.tsx src/app/chat/ChatWorkspace.tsx
+git commit -m "feat: chat drafts are size-capped, expire after 14 days, and prune to 20"
 ```
 
 ---
 
-### Task 2: Calendar — 1-day view + manual events
+### Task 3: 1-day calendar shows every hour
 
 **Files:**
-- Modify: `src/db/repo/events.ts` (deleteEvent)
-- Create: `src/db/repo/events.test.ts`
-- Modify: `src/app/planner/calendarItems.ts` (refId + manual on CalendarItem)
-- Modify: `src/app/planner/calendarItems.test.ts`
-- Modify: `src/app/planner/CalendarTab.tsx` ("1d" mode, QuickEvent, chip delete)
+- Modify: `src/app/planner/CalendarTab.tsx`
 
-**Interfaces:**
-- Consumes: `insertEvent` (already accepts `source`), existing `CalendarItem` consumers (DayList/MonthGrid).
-- Produces: `deleteEvent(id: string): Promise<void>`; `CalendarItem` gains `refId: string` (the underlying row id) and `manual: boolean` (deletable manual event).
+**Interfaces:** none new; `HourDay` is module-private.
 
-- [ ] **Step 1: Failing tests**
+- [ ] **Step 1: `HourDay` component**
 
-`src/db/repo/events.test.ts` (new):
-
-```ts
-import { beforeEach, afterEach, describe, expect, it } from "vitest";
-import { createTestDbClient } from "@/db/testClient";
-import { setDb } from "@/db/client";
-import { deleteEvent, insertEvent, listEventsBetween } from "./events";
-
-let db: ReturnType<typeof createTestDbClient>;
-beforeEach(() => {
-    db = createTestDbClient();
-    setDb(db);
-});
-afterEach(() => db.close());
-
-describe("manual events", () => {
-    it("creates with source manual and deletes by id", async () => {
-        const t0 = Date.now();
-        const e = await insertEvent({
-            title: "Dentist",
-            startsAt: t0 + 3_600_000,
-            endsAt: t0 + 5_400_000,
-            location: "Lafayette",
-            source: "manual",
-        });
-        expect(e.source).toBe("manual");
-        expect(await listEventsBetween(t0, t0 + 86_400_000)).toHaveLength(1);
-        await deleteEvent(e.id);
-        expect(await listEventsBetween(t0, t0 + 86_400_000)).toHaveLength(0);
-    });
-});
-```
-
-Extend `calendarItems.test.ts` with a manual-event case:
-
-```ts
-    it("marks manual events deletable and carries the row id", async () => {
-        const t0 = Date.now();
-        const e = await insertEvent({
-            title: "Dentist",
-            startsAt: t0 + 3_600_000,
-            endsAt: t0 + 5_400_000,
-            source: "manual",
-        });
-        const items = await collectCalendarItems(t0, t0 + 7 * DAY);
-        expect(items[0]).toMatchObject({
-            kind: "event",
-            refId: e.id,
-            manual: true,
-        });
-    });
-```
-
-Run: `npx vitest run src/db/repo/events.test.ts src/app/planner/calendarItems.test.ts`
-Expected: FAIL — `deleteEvent` not exported; `refId`/`manual` missing.
-
-- [ ] **Step 2: Repo + collector**
-
-`events.ts`:
-
-```ts
-export async function deleteEvent(id: string): Promise<void> {
-    await getDb().execute("DELETE FROM events WHERE id = ?", [id]);
-}
-```
-
-`calendarItems.ts` — add to the interface:
-
-```ts
-    /** Underlying row id (task/event/automation/application). */
-    refId: string;
-    /** True for user-created events — the only calendar items deletable in place. */
-    manual: boolean;
-```
-
-Every push site sets `refId` (the bare `e.id`/`t.id`/`a.id`/`app.id`) and `manual: false`, except the event branch which sets `manual: e.source === "manual"`.
-
-Run the two test files — Expected: PASS.
-
-- [ ] **Step 3: CalendarTab — "1d" mode**
-
-```ts
-type ViewMode = "1d" | "7d" | "14d" | "month";
-```
-
-`rangeFor` gains, before the non-month path (or fold into it):
-
-```ts
-    if (mode === "1d") {
-        const from = startOfDay(anchor);
-        return { from, to: from + DAY };
-    }
-```
-
-The mode buttons array becomes `(["1d", "7d", "14d", "month"] as const)` with label logic `m === "month" ? "1 month" : m === "1d" ? "1 day" : \`${m.slice(0, -1)} days\``. In `shift`, the non-month step becomes `(mode === "1d" ? 1 : mode === "7d" ? 7 : 14) * DAY`. Render: `mode === "month" ? <MonthGrid …> : <DayList from={from} days={mode === "1d" ? 1 : mode === "7d" ? 7 : 14} …>`.
-
-- [ ] **Step 4: CalendarTab — QuickEvent form + chip delete**
-
-Add a QuickEvent component rendered between the FilterChips and the grid:
+Replace the 1d branch (`<DayList days={1} …>`) with `<HourDay from={from} items={visible} onDeleteManual={…} />`:
 
 ```tsx
-function QuickEvent({ onAdd }: { onAdd: (input: {
-    title: string;
-    startsAt: number;
-    endsAt: number;
-    location: string | null;
-}) => Promise<void> }) {
-    const [title, setTitle] = useState("");
-    const [start, setStart] = useState("");
-    const [minutes, setMinutes] = useState("60");
-    const [location, setLocation] = useState("");
-    const [saving, setSaving] = useState(false);
-
-    const submit = async () => {
-        if (!title.trim() || !start || saving) return;
-        setSaving(true);
-        try {
-            const startsAt = new Date(start).getTime();
-            await onAdd({
-                title: title.trim(),
-                startsAt,
-                endsAt: startsAt + Math.max(5, Number(minutes) || 60) * 60_000,
-                location: location.trim() || null,
-            });
-            setTitle("");
-            setStart("");
-            setLocation("");
-        } finally {
-            setSaving(false);
-        }
-    };
-
+function HourDay({
+    from,
+    items,
+    onDeleteManual,
+}: {
+    from: number;
+    items: CalendarItem[];
+    onDeleteManual?: (item: CalendarItem) => void;
+}) {
+    const nowHour =
+        startOfDay(Date.now()) === from ? new Date().getHours() : -1;
     return (
-        <div className="flex items-end gap-2">
-            <label className="flex flex-1 flex-col gap-1 text-sm">
-                New event
-                <Input
-                    value={title}
-                    placeholder="e.g. Dentist"
-                    onChange={(e) => setTitle(e.target.value)}
-                    onKeyDown={(e) => {
-                        if (e.key === "Enter" && !e.repeat && !saving) void submit();
-                    }}
-                />
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-                Starts
-                <Input
-                    type="datetime-local"
-                    value={start}
-                    onChange={(e) => setStart(e.target.value)}
-                />
-            </label>
-            <label className="flex w-24 flex-col gap-1 text-sm">
-                Minutes
-                <Input
-                    type="number"
-                    min={5}
-                    value={minutes}
-                    onChange={(e) => setMinutes(e.target.value)}
-                />
-            </label>
-            <label className="flex w-36 flex-col gap-1 text-sm">
-                Where (optional)
-                <Input
-                    value={location}
-                    onChange={(e) => setLocation(e.target.value)}
-                />
-            </label>
-            <Button onClick={() => void submit()} disabled={saving} aria-label="Add event">
-                <Plus className="h-4 w-4" />
-            </Button>
+        <div className="flex flex-col">
+            {Array.from({ length: 24 }, (_, h) => {
+                const hourStart = from + h * 3_600_000;
+                const hourItems = items.filter(
+                    (x) => x.at >= hourStart && x.at < hourStart + 3_600_000,
+                );
+                return (
+                    <div
+                        key={h}
+                        className={cn(
+                            "flex min-h-8 gap-3 border-t border-border/40 px-1 py-0.5",
+                            h === nowHour && "bg-primary/5",
+                        )}
+                    >
+                        <span
+                            className={cn(
+                                "w-12 shrink-0 pt-0.5 text-right font-mono text-[10px] text-muted-foreground/70",
+                                h === nowHour && "text-primary",
+                            )}
+                        >
+                            {new Date(hourStart).toLocaleTimeString(undefined, {
+                                hour: "numeric",
+                            })}
+                        </span>
+                        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                            {hourItems.map((x) => (
+                                <ItemChip
+                                    key={x.id}
+                                    item={x}
+                                    showTime
+                                    onDelete={
+                                        x.manual
+                                            ? () => onDeleteManual?.(x)
+                                            : undefined
+                                    }
+                                />
+                            ))}
+                        </div>
+                    </div>
+                );
+            })}
         </div>
     );
 }
 ```
 
-Wire in `CalendarTab` (imports: `insertEvent`, `deleteEvent` from `@/db/repo/events`, `Plus` from lucide):
+(Match `ItemChip`'s actual onDelete prop wiring from the current file — DayList passes it the same way. Empty hours render as thin rows, which is the point: gaps become visible.)
 
-```tsx
-            <QuickEvent
-                onAdd={(input) =>
-                    act(() => insertEvent({ ...input, source: "manual" }))
-                }
-            />
-```
+- [ ] **Step 2: Gates + commit**
 
-Chip delete — `ItemChip` gains an optional `onDelete`; render an ✕ only when provided:
-
-```tsx
-            {onDelete && (
-                <button
-                    aria-label={`Delete ${item.title}`}
-                    className="ml-auto shrink-0 cursor-pointer text-muted-foreground hover:text-destructive"
-                    onClick={() => onDelete()}
-                >
-                    <X className="h-3 w-3" />
-                </button>
-            )}
-```
-
-`DayList` gains `onDeleteManual?: (item: CalendarItem) => void` and passes `onDelete={item.manual ? () => onDeleteManual?.(item) : undefined}` per chip. (MonthGrid chips stay non-interactive — cells are too small.) `CalendarTab` supplies `onDeleteManual={(item) => void act(() => deleteEvent(item.refId))}`.
-
-- [ ] **Step 5: Gates + browser check + commit**
-
-Run: `npm run typecheck && npm test` — Expected: PASS.
-Browser: Calendar → "1 day" mode shows one row; add an event via the form; it appears with a time and an ✕ in day views; ✕ removes it; month view shows it without an ✕; ICS-imported events show no ✕.
+`npm run typecheck && npm test` → PASS.
 
 ```bash
-git add src/db/repo/events.ts src/db/repo/events.test.ts src/app/planner
-git commit -m "feat: 1-day calendar view + manual event creation and deletion"
+git add src/app/planner/CalendarTab.tsx
+git commit -m "feat: 1-day calendar renders a full hourly timeline"
 ```
 
 ---
 
-### Task 3: Exo-sphere hidden until the user scrolls out
+### Task 4: Paste-text documents in projects (+ confirm metadata-only file referencing)
 
-At zoom 1 the exo-shell must be invisible (no stars outside the ring, no stray labels, no hit targets); it fades in as the user zooms below ~0.95 and is fully visible by ~0.7. Pure scalar math in the existing draw pass — no allocations, no new state.
+The todo's "files referenced with just the metadata" is **already true by design** — documents reach the model only through `search_documents`/`read_document` retrieval; nothing inlines file bodies into chat context. This task adds the claude.ai-style "add your own text" affordance next to the existing upload, and records the retrieval guarantee in the architecture doc so the question stays answered.
 
 **Files:**
-- Modify: `src/components/hud/networkData.ts` (relativeTime fix; EXO_SHELL bump)
-- Modify: `src/components/hud/networkData.test.ts` (relativeTime cases)
-- Modify: `src/components/hud/NetworkSphere.tsx` (draw pass, initial JSX opacities, hit gating)
-- Modify: `src/app/chat/ChatWorkspace.tsx` (hint copy only)
+- Modify: `src/app/projects/ProjectDetail.tsx` (Add-text form in the files section)
+- Modify: `src/db/repo/documents.ts` (only if no plain-text create function exists — check first; PDF ingestion may already route through a general insert)
+- Modify: `docs/architecture.md` (one sentence in the retrieval/multimodal area)
 
-**Interfaces:** none new (`relativeTime`'s signature is unchanged — only its unit handling is fixed).
+**Interfaces:**
+- Produces (if created): `createTextDocument(input: { title: string; contentText: string; folder: string; projectId?: string | null }): Promise<Document>` — mime `text/plain`, `source_name: null`, `byte_size: contentText.length`, `page_count: null`. FTS sync is automatic (documents_fts triggers exist since 0001).
 
-- [ ] **Step 0a: Fix `relativeTime` (QA-reported: chat details say "Updated in 20,631,053 days")**
+- [ ] **Step 1: Check the repo, add the function if missing (with a small test)**
 
-`relativeTime` in networkData.ts computes `ts * 1000 - Date.now()` — it treats its input as **seconds**, but every caller passes **milliseconds** (`now()` = `Date.now()`), so freshly-updated chats render absurd far-future dates. TDD — add to networkData.test.ts:
+Read `src/db/repo/documents.ts`. If an insert covering plain text exists, reuse it. Otherwise add `createTextDocument` per the interface above (mirror the file's insert style) plus a test in the documents/repo test file: create → `searchDocuments("planted phrase")` finds it (proves FTS trigger coverage) and `project_id` round-trips.
+
+- [ ] **Step 2: ProjectDetail UI**
+
+In the files section, next to the existing upload control, an "Add text" toggle revealing an inline form (Input title + Textarea body + Save/Cancel), submitting through the page's existing error-handling helper:
+
+```tsx
+    const [addingText, setAddingText] = useState(false);
+    const [textTitle, setTextTitle] = useState("");
+    const [textBody, setTextBody] = useState("");
+```
+
+Save handler: require both trimmed non-empty, call the create function with the project's folder convention (match whatever folder the existing upload path assigns — read the upload code and use the same value) and `projectId: project.id`, then clear + refresh the file list. Keep the form styling consistent with the page's other inline forms.
+
+- [ ] **Step 3: docs/architecture.md** — one sentence where retrieval is described: project files enter chats only via retrieval tools (search/read), never inlined; pasted-text documents follow the same path.
+
+- [ ] **Step 4: Gates + commit**
+
+`npm run typecheck && npm test` → PASS.
+
+```bash
+git add src/app/projects/ProjectDetail.tsx src/db/repo/documents.ts docs/architecture.md
+git commit -m "feat: projects accept pasted-text documents; retrieval-only guarantee documented"
+```
+
+(Include the repo test file in the add if created.)
+
+---
+
+### Task 5: Exo-sphere as unlimited pull-in layers; inner sphere fades on zoom-out
+
+The redesign the todo asks for: exo chats split into rings of at most `EXO_LAYER_SIZE`, unlimited ring count. At rest nothing exo is visible. Scrolling out reveals ring 0 first — sliding in from farther away (scroll-driven "pull-in animation") — then ring 1, ring 2, … while the inner sphere fades back so the revealed ring reads as the focus.
+
+**Files:**
+- Modify: `src/components/hud/networkData.ts` (layer assignment)
+- Modify: `src/components/hud/networkData.test.ts`
+- Modify: `src/components/hud/NetworkSphere.tsx` (staged reveal, pull-in, inner fade)
+
+**Interfaces:**
+- `EXO_LAYER_SIZE = 12`, `EXO_SHELL_BASE = 1.75`, `EXO_SHELL_STEP = 0.4` exported from networkData. A node's layer is derivable from its shell: `Math.round((shell - EXO_SHELL_BASE) / EXO_SHELL_STEP)`; NetworkSphere derives it with that arithmetic (no new node field).
+
+- [ ] **Step 1: Failing test — layer assignment**
 
 ```ts
-describe("relativeTime", () => {
-    it("treats input as milliseconds", () => {
-        expect(relativeTime(Date.now() - 5 * 60_000)).toMatch(/5 minutes ago/);
-        expect(relativeTime(Date.now() - 2 * 86_400_000)).toMatch(/2 days ago/);
+    it("splits exo overflow into rings of EXO_LAYER_SIZE with stepped shells", () => {
+        const sessions = Array.from({ length: CATEGORY_INNER + 30 }, (_, i) =>
+            session(`ses_${i}`, { category_id: "cat_a", updated_at: 1000 - i }),
+        );
+        const net = buildCategoryUniverse({
+            categories: [cat("cat_a", "School")],
+            projects: [], sessions, documents: [], presets: [], agents: [],
+            focusCategoryId: "cat_a",
+        });
+        const exo = net.nodes.filter((n) => (n.shell ?? 1) > 1);
+        expect(exo).toHaveLength(30);
+        const shells = new Set(exo.map((n) => n.shell));
+        expect(shells).toEqual(
+            new Set([EXO_SHELL_BASE, EXO_SHELL_BASE + EXO_SHELL_STEP, EXO_SHELL_BASE + 2 * EXO_SHELL_STEP]),
+        );
+        // Ring 0 holds the newest EXO_LAYER_SIZE of the overflow.
+        expect(
+            exo.filter((n) => n.shell === EXO_SHELL_BASE),
+        ).toHaveLength(EXO_LAYER_SIZE);
     });
-});
 ```
 
-Run → FAIL (renders a huge future value). Fix the first line of `relativeTime` to:
+(12 + 12 + 6 = 30 across three rings. Adapt factories as before; update the older exo test that expects the flat single-shell EXO_SHELL if it pins counts.)
+
+Run → FAIL.
+
+- [ ] **Step 2: networkData layer assignment**
+
+Replace `EXO_SHELL = 1.75` with:
 
 ```ts
-    const sec = Math.round((ts - Date.now()) / 1000);
+export const EXO_LAYER_SIZE = 12;
+export const EXO_SHELL_BASE = 1.75;
+export const EXO_SHELL_STEP = 0.4;
 ```
 
-Run → PASS. (`Intl.RelativeTimeFormat` wording can vary by ICU build — if the exact phrase differs, loosen the regex to digits + unit, but it must assert *past*-tense output.)
-
-- [ ] **Step 0b: Push the exo-shell further out (QA-reported: too close to the newest chats)**
-
-In networkData.ts change `EXO_SHELL = 1.4` → `EXO_SHELL = 1.75`. If any test pins the literal 1.4, assert against the exported `EXO_SHELL` const instead. Geometry check (record in the report): at min zoom 0.55 the exo orbit projects at 40 × 1.75 × 0.55 ≈ 38.5 < 50 — still inside the chart frame when scrolled out; at zoom 1 it sits far outside, which Task 3's reveal hides anyway.
-
-- [ ] **Step 1: Reveal factor in `draw()`**
-
-Add module consts next to `RADIUS`:
+In the exo loop, per index `i`: `const layer = Math.floor(i / EXO_LAYER_SIZE);` and each ring gets its own fibonacci distribution — group first:
 
 ```ts
-const EXO_REVEAL_START = 0.95; // exo starts fading in below this zoom
-const EXO_REVEAL_FULL = 0.7; // fully visible at or below this zoom
+    for (let layer = 0; layer * EXO_LAYER_SIZE < exo.length; layer++) {
+        const ring = exo.slice(layer * EXO_LAYER_SIZE, (layer + 1) * EXO_LAYER_SIZE);
+        const ringUnits = fibonacciSphere(Math.max(1, ring.length));
+        const shell = EXO_SHELL_BASE + layer * EXO_SHELL_STEP;
+        ring.forEach((s, i) => {
+            /* existing exo node push, with unit: ringUnits[i]!, shell */
+        });
+    }
 ```
 
-At the top of `draw()`'s per-frame body (before the node loop), compute once:
+(Keep the node fields otherwise identical; the meta foot's "exo-sphere" text may add ` · ring ${layer + 1}` for hover clarity.) Run tests → PASS (fix the old flat-shell assertions to use `EXO_SHELL_BASE`).
+
+- [ ] **Step 3: NetworkSphere staged reveal + pull-in + inner fade**
+
+Replace the single `reveal` computation with per-frame scalars (still allocation-free — layer math is per-node arithmetic on existing loop variables):
 
 ```ts
-            const zoom = zoomRef.current;
-            const reveal = Math.min(
-                1,
-                Math.max(
-                    0,
-                    (EXO_REVEAL_START - zoom) / (EXO_REVEAL_START - EXO_REVEAL_FULL),
-                ),
+const EXO_REVEAL_SPAN = 0.12; // zoom range each ring takes to fade in
+const EXO_REVEAL_FIRST = 0.95; // ring 0 starts below this zoom
+const EXO_PULL = 0.5; // how much farther out a ring sits before it's revealed
+const INNER_FADE_START = 0.85; // inner sphere starts receding below this
+const INNER_FADE_FLOOR = 0.12; // and bottoms out at this opacity factor
+```
+
+In `draw()` per node (shell > 1):
+
+```ts
+                const shell = node.shell ?? 1;
+                let ringReveal = 1;
+                if (shell > 1) {
+                    const layer = Math.round((shell - EXO_SHELL_BASE) / EXO_SHELL_STEP);
+                    const start = EXO_REVEAL_FIRST - layer * EXO_REVEAL_SPAN;
+                    ringReveal = Math.min(
+                        1,
+                        Math.max(0, (start - zoom) / EXO_REVEAL_SPAN),
+                    );
+                }
+```
+
+Projection uses the pull-in: an unrevealed ring sits `EXO_PULL` farther out and slides to its shell as it reveals (scroll-driven animation):
+
+```ts
+                const effShell = shell > 1 ? shell + (1 - ringReveal) * EXO_PULL : 1;
+                const p = projectQuat(node.unit, orient, RADIUS * zoom * effShell);
+```
+
+Opacity/labels/hits for exo use `ringReveal` where the previous flat `reveal` was used (`op *= 0.6 * ringReveal`, `lop *= ringReveal`, hit gate `ringReveal > 0.2`). Inner fade — for `shell === 1` nodes compute once per frame:
+
+```ts
+            const innerFade = Math.max(
+                INNER_FADE_FLOOR,
+                Math.min(1, 1 - (INNER_FADE_START - zoom) / (INNER_FADE_START - 0.6) * (1 - INNER_FADE_FLOOR)),
             );
 ```
 
-Replace the flat exo dimming line (`if ((node.shell ?? 1) > 1) op *= 0.6;`) with:
+(Clamp so `zoom >= INNER_FADE_START` → 1, `zoom <= 0.6` → floor.) Apply `op *= innerFade`, `lop *= innerFade`, and to edge opacity (`eop *= innerFade` — edges only ever connect inner-sphere nodes), and gate inner hit targets off below `innerFade < 0.2` so the faded sphere doesn't steal clicks. Imports: `EXO_SHELL_BASE`, `EXO_SHELL_STEP` from networkData. Zoom bounds: extend min zoom so deep rings are reachable — `Math.max(0.35, …)` replaces 0.55, and verify geometry: ring k's revealed extent `RADIUS * zoom * (EXO_SHELL_BASE + k*STEP)` — at zoom 0.35, ring 4 (shell 3.35) ≈ 47 < 50. Note in the report how many rings fit before clipping.
 
-```ts
-                if ((node.shell ?? 1) > 1) op *= 0.6 * reveal;
-```
+- [ ] **Step 4: Gates + commit**
 
-In the label block, gate exo labels the same way — after `lop` is computed:
-
-```ts
-                    if ((node.shell ?? 1) > 1) lop *= reveal;
-```
-
-In the hit-target block, extend the pointer-events condition so hidden exo nodes can't be clicked or hovered:
-
-```ts
-                    hit.style.pointerEvents =
-                        p.depth > 0.45 && ((node.shell ?? 1) === 1 || reveal > 0.2)
-                            ? "auto"
-                            : "none";
-```
-
-The spike opacity already derives from `op` (`op * 0.45`), so spikes fade with the body for free — verify that's still true after editing.
-
-- [ ] **Step 2: First-paint opacities**
-
-The seed JSX paints before the first rAF. For `shell > 1` nodes, initial `fillOpacity` must be 0 on the node circle AND the spike group (labels already start at 0). In the three JSX map blocks, wrap the existing opacity expressions:
-
-```tsx
-                        fillOpacity={(n.shell ?? 1) > 1 ? 0 : 0.35 + 0.65 * seed[i]!.depth}
-```
-
-(and the equivalent on the spike `<g>`'s `fillOpacity`).
-
-- [ ] **Step 3: Hint copy**
-
-In `ChatWorkspace`, when `sphereFocus` is set, the standing-by hint should read: `Hover to inspect · click to open · scroll out for older chats.` (keep the existing copy otherwise).
-
-- [ ] **Step 4: Gates + browser check + commit**
-
-Run: `npm run typecheck && npm test` — Expected: PASS (no unit tests touch draw internals).
-Browser: focus a category with >8 chats — at rest nothing renders outside the ring; scrolling out fades the exo stars in; scrolling back in hides them and they stop being hoverable; reduced-motion (emulate via devtools) still shows/hides on scroll.
+`npm run typecheck && npm test` → PASS.
 
 ```bash
-git add src/components/hud/NetworkSphere.tsx src/app/chat/ChatWorkspace.tsx
-git commit -m "feat: exo-sphere stays hidden until the user scrolls out"
+git add src/components/hud
+git commit -m "feat: exo-sphere becomes staged pull-in rings; inner sphere recedes on zoom-out"
 ```
+
+(User check later: scroll out slowly — rings arrive one at a time from outside, inner sphere dims; scroll in — everything returns.)
 
 ---
 
-### Task 4: Subtle agent satellites on category-sphere chat stars
-
-The category-focused sphere lost the old per-chat agent visualization. Restore it subtly: inner chat stars get their preset's agent nodes as small, label-quiet satellites — no tool sub-satellites (that was the old noise) — plus agent chips on the hover card. With Task 3's exo fade, the focused sphere has room for this.
+### Task 6: Ollama, actually set up — connection test, live model list, hosted guidance
 
 **Files:**
-- Modify: `src/components/hud/networkData.ts` (attachAgent opts; buildCategoryUniverse inner loop)
-- Modify: `src/components/hud/networkData.test.ts`
+- Modify: `src/app/settings/SettingsPage.tsx`
 
-**Interfaces:**
-- `attachAgent` gains an options parameter `{ r?: number; withTools?: boolean }` (defaults preserve current behavior: `r: AGENT_R`, `withTools: true`). Still module-private.
+**Interfaces:** none new (module-private helpers).
 
-- [ ] **Step 1: Failing test**
+- [ ] **Step 1: Connection test + model list**
 
-In the `buildCategoryUniverse` describe block (reuse its existing `cat`/`session` factories and however the file builds presets/agent defs for `buildUniverseNetwork`'s tests):
-
-```ts
-    it("focused chat stars carry subtle agent satellites, no tools", () => {
-        const agent = agentDef("agt_r", "Research", '["search_web","fetch_url"]');
-        const preset = presetWith("pre_1", ["agt_r"]);
-        const net = buildCategoryUniverse({
-            categories: [cat("cat_a", "School")],
-            projects: [],
-            sessions: [session("ses_1", { category_id: "cat_a", preset_id: "pre_1" })],
-            documents: [],
-            presets: [preset],
-            agents: [agent],
-            focusCategoryId: "cat_a",
-        });
-        const agents = net.nodes.filter((n) => n.kind === "agent");
-        expect(agents).toHaveLength(1);
-        expect(agents[0]!.primary).toBe(false);
-        expect(agents[0]!.r).toBeLessThan(1.5); // subtler than the old AGENT_R
-        expect(net.nodes.filter((n) => n.kind === "tool")).toHaveLength(0);
-        // Hover card lists the agents as chips.
-        const star = net.nodes.find((n) => n.id === "session:ses_1")!;
-        expect(star.meta.chips?.map((c) => c.label)).toEqual(["research"]);
-    });
-```
-
-(`agentDef`/`presetWith` — use the file's existing factory names; if none exist for presets/agents, add minimal ones mirroring the `session` factory. `"research"` is `agentSlug("Research")`.)
-
-Run: `npx vitest run src/components/hud/networkData.test.ts` — Expected: FAIL (no agent nodes in focused view).
-
-- [ ] **Step 2: Implement**
-
-`attachAgent` signature and body:
-
-```ts
-function attachAgent(
-    net: Network,
-    hubId: string,
-    hubUnit: Vec3,
-    def: AgentDef,
-    slot: number,
-    slots: number,
-    idPrefix: string,
-    opts: { r?: number; withTools?: boolean } = {},
-) {
-    const r = opts.r ?? AGENT_R;
-    const withTools = opts.withTools ?? true;
-```
-
-Use `r` for the agent node's radius; wrap the existing `tools.forEach(…)` block in `if (withTools) { … }`. Existing callers are untouched (defaults).
-
-In `buildCategoryUniverse`'s inner-sessions loop (the `for (const s of inner)` block), after pushing the hub node:
-
-```ts
-        const defs = safeAgents(preset)
-            .map((id) => agentsById.get(id))
-            .filter((d): d is AgentDef => d !== undefined);
-        defs.forEach((def, k) =>
-            attachAgent(net, `session:${s.id}`, unit, def, k, defs.length, `session:${s.id}`, {
-                r: 1.0,
-                withTools: false,
-            }),
-        );
-```
-
-and add chips to that hub's meta (mirroring the old recent-star meta):
-
-```ts
-                chips: defs.map((d) => {
-                    const info = agentInfo(d);
-                    return { label: info.slug, color: info.color };
-                }),
-```
-
-Run the test file — Expected: PASS. Also re-run the whole suite (satellite counts may be asserted elsewhere).
-
-- [ ] **Step 3: Gates + browser check + commit**
-
-Run: `npm run typecheck && npm test` — Expected: PASS.
-Browser: focused category sphere — chat stars show small dim companion dots that brighten with the star's subtree on hover; hover card lists agent chips; no tool clutter.
-
-```bash
-git add src/components/hud/networkData.ts src/components/hud/networkData.test.ts
-git commit -m "feat: subtle agent satellites return to category chat stars"
-```
-
----
-
-### Task 5: Context-aware creation — chats and notes inherit where you are
-
-Three flows: (a) new chats from the chat sidebar inherit the focused category (sphere drill-in) or the active category filter; (b) clicking a project star navigates to that project's detail page, where "Start project chat" already files correctly; (c) new notes inherit the active category filter, and CategoryDetail's Notes tab gets a "New note here" button.
-
-**Files:**
-- Modify: `src/app/Sidebar.tsx` (NavTarget gains `projectId?: string`)
-- Modify: `src/app/Shell.tsx` (pass through)
-- Modify: `src/app/agents/AgentsPage.tsx` (onNavigate prop → ChatWorkspace)
-- Modify: `src/app/chat/ChatWorkspace.tsx` (lift categoryFilter; creationCategoryId; project-star click)
-- Modify: `src/app/chat/InstancesSidebar.tsx` (categoryFilter becomes controlled props)
-- Modify: `src/app/categories/CategoriesPage.tsx` (initialProjectId deep-link)
-- Modify: `src/app/categories/CategoryDetail.tsx` ("New note here")
-- Modify: `src/app/notes/NotesPage.tsx` (new note inherits filter)
-
-**Interfaces:**
-- `NavTarget` gains `projectId?: string`.
-- `InstancesSidebar` props: `categoryFilter: string | null; onCategoryFilter: (id: string | null) => void` replace its internal state.
-- `AgentsPage` and `ChatWorkspace` gain `onNavigate?: (t: NavTarget) => void`.
-- `CategoriesPage` gains `initialProjectId?: string`.
-
-- [ ] **Step 1: NavTarget + Shell plumbing**
-
-`Sidebar.tsx`: add `projectId?: string;` to `NavTarget`.
-`Shell.tsx`: pass `initialProjectId={nav.projectId}` to `CategoriesPage`, and `onNavigate={setNav}` to `AgentsPage`.
-
-- [ ] **Step 2: Lift the chat category filter**
-
-In `InstancesSidebar`, delete the local `categoryFilter` state; add the two props and use them everywhere the state was used (FilterChips `active`/`onChange`, the visible predicate). In `ChatWorkspace`:
+In the provider settings area (near the existing Ollama base URL input), add:
 
 ```tsx
-    const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
-```
+    const [ollamaStatus, setOllamaStatus] = useState<string | null>(null);
+    const [ollamaModels, setOllamaModels] = useState<string[]>([]);
 
-pass `categoryFilter={categoryFilter} onCategoryFilter={setCategoryFilter}` down.
-
-- [ ] **Step 3: Creation context for new chats**
-
-In `ChatWorkspace` (UNFILED_ID import from `@/components/hud/networkData`):
-
-```tsx
-    // Where a new chat files itself: the sphere's focused category wins,
-    // else the sidebar's active filter. "unfiled" means explicitly nowhere.
-    const creationCategoryId =
-        sphereFocus && sphereFocus !== UNFILED_ID
-            ? sphereFocus
-            : sphereFocus === UNFILED_ID
-              ? null
-              : categoryFilter;
-```
-
-`newChat` passes it:
-
-```tsx
-            const session = await sessionsRepo.createSession({
-                title: `${preset.name} chat`,
-                presetId: preset.id,
-                permissionLevelId: preset.permission_level_id,
-                categoryId: creationCategoryId,
-            });
-```
-
-(and `creationCategoryId` joins `newChat`'s dependency array.)
-
-- [ ] **Step 4: Project stars navigate**
-
-In `openFromNode`, replace the `if (node.kind === "project") return;` branch:
-
-```ts
-            if (node.kind === "project") {
-                const project = (node.payload as { project: Project }).project;
-                onNavigate?.({ page: "categories", projectId: project.id });
-                return;
-            }
-```
-
-`ChatWorkspace` accepts `onNavigate` (threaded from AgentsPage), added to `openFromNode`'s deps. In `AgentsPage`, accept `onNavigate` and pass it to `<ChatWorkspace onNavigate={onNavigate} …>`.
-
-In `CategoriesPage`, accept `initialProjectId` and open it on arrival (works for categorized projects too, not just loose ones):
-
-```tsx
-    useEffect(() => {
-        if (!initialProjectId) return;
-        void projectsRepo
-            .getProject(initialProjectId)
-            .then((p) => setOpenProject(p))
-            .catch(() => setOpenProject(null));
-    }, [initialProjectId]);
-```
-
-This requires generalizing the current `openProjectId`-into-`looseProjects` lookup into an `openProject: Project | null` state object (the loose-project card click sets the object directly). `ProjectDetail` usage is unchanged.
-
-- [ ] **Step 5: Notes inherit context**
-
-`NotesPage.tsx`'s new-note handler (line ~120) becomes:
-
-```tsx
-        const note = await notesRepo.createNote({ categoryId: categoryFilter });
-```
-
-(`categoryFilter` is the existing filter state in `NotesTabBody`; when null the note is uncategorized — same as today.)
-
-`CategoryDetail.tsx`'s Notes tab gets a create button above the list:
-
-```tsx
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            className="self-start"
-                            onClick={() =>
-                                void act(async () => {
-                                    await notesRepo.createNote({
-                                        title: "Untitled",
-                                        categoryId: category.id,
-                                    });
-                                }).then(() =>
-                                    onNavigate({ page: "notes", tab: "notes" }),
-                                )
-                            }
-                        >
-                            <Plus className="mr-1 h-3.5 w-3.5" /> New note here
-                        </Button>
-```
-
-(Import `Plus`; note `act` returns a success boolean since the last round — only navigate on `true`: `.then((ok) => { if (ok) onNavigate(...) })`.)
-
-- [ ] **Step 5b: Double-click a chat title to rename (QA request)**
-
-In `InstancesSidebar`'s Row, the title `<button>` (the one whose `onClick` calls `onOpen(s)`) gains:
-
-```tsx
-                            onDoubleClick={() => {
-                                renameHandledRef.current = false;
-                                setRenamingId(s.id);
-                                setDraftTitle(s.title);
-                            }}
-```
-
-— the same body as the pencil button's onClick. Single click still opens the chat (the first click of a double-click will open it too; that's fine — rename mode then appears in place).
-
-- [ ] **Step 6: Gates + browser check + commit**
-
-Run: `npm run typecheck && npm test` — Expected: PASS.
-Browser: filter the chat sidebar to a category → new chat lands in that category (check its expanded row); drill into a category sphere → new chat files there; click a project star → project detail opens; "Start project chat" still files under the project; Notes filtered to a category → New note carries it; CategoryDetail → New note here → note appears in Notes filtered view.
-
-```bash
-git add src/app/Sidebar.tsx src/app/Shell.tsx src/app/agents/AgentsPage.tsx src/app/chat src/app/categories src/app/notes/NotesPage.tsx
-git commit -m "feat: new chats and notes inherit the project/category context they're created from"
-```
-
----
-
-### Task 6: Home becomes a launcher
-
-Bookmarks one click away, quick capture (task or note) without leaving Home, recent chats, and the existing tiles/cards become navigation. Everything Home shows stays read-at-a-glance — no new heavy panels.
-
-**Files:**
-- Modify: `src/app/Shell.tsx` (pass `onNavigate` to HomePage)
-- Modify: `src/app/home/HomePage.tsx`
-
-**Interfaces:**
-- Consumes: `listBookmarks` from `@/db/repo/library` (check its filter signature before use), `openExternal` from `@/lib/openExternal`, `createTask` from `@/db/repo/tasks`, `createNote` from `@/db/repo/notes`, `sessionColor` from `@/components/hud/networkData`, `NavTarget`.
-- Produces: `HomePage({ onNavigate }: { onNavigate?: (t: NavTarget) => void } = {})` — default param keeps the `PAGES` record assignable, mirroring NotesPage's pattern.
-
-- [ ] **Step 1: Shell wiring**
-
-In `Shell.tsx`, special-case home like the other prop-taking pages:
-
-```tsx
-                            {nav.page === "home" ? (
-                                <HomePage onNavigate={setNav} />
-                            ) : nav.page === "agents" ? (
-```
-
-- [ ] **Step 2: HomePage additions**
-
-Load more in the boot effect (parallel with the existing calls): `bookmarks: (await listBookmarks()).slice(0, 8)` and keep the raw `sessions` list (first 3) instead of only its length — extend `HomeStats` or add a `recent` state:
-
-```tsx
-    const [recent, setRecent] = useState<ChatSession[]>([]);
-    const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
-```
-
-Quick capture (below the header, above the stats row):
-
-```tsx
-function QuickCapture({ onNavigate }: { onNavigate?: (t: NavTarget) => void }) {
-    const [text, setText] = useState("");
-    const [saving, setSaving] = useState(false);
-    const [saved, setSaved] = useState<string | null>(null);
-
-    const capture = async (kind: "task" | "note") => {
-        const title = text.trim();
-        if (!title || saving) return;
-        setSaving(true);
+    const testOllama = async () => {
+        setOllamaStatus("checking…");
+        setOllamaModels([]);
         try {
-            if (kind === "task") {
-                await createTask({ title });
-                setSaved("Task added — see Planner.");
-            } else {
-                await createNote({ title });
-                setSaved("Note created — see Notes.");
-            }
-            setText("");
+            const res = await appFetch(`${form.ollamaBaseUrl}/api/tags`);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = (await res.json()) as { models?: { name: string }[] };
+            const names = (data.models ?? []).map((m) => m.name);
+            setOllamaModels(names);
+            setOllamaStatus(
+                names.length
+                    ? `connected — ${names.length} model${names.length === 1 ? "" : "s"} installed`
+                    : "connected, but no models installed — run: ollama pull llama3.2:3b",
+            );
         } catch (e) {
-            setSaved(e instanceof Error ? e.message : String(e));
-        } finally {
-            setSaving(false);
+            setOllamaStatus(
+                `not reachable (${e instanceof Error ? e.message : String(e)}) — is Ollama running?`,
+            );
         }
     };
-
-    return (
-        <div className="flex items-center gap-2">
-            <Input
-                value={text}
-                placeholder="Capture a task or note…"
-                onChange={(e) => {
-                    setText(e.target.value);
-                    setSaved(null);
-                }}
-                onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.repeat) void capture("task");
-                }}
-            />
-            <Button size="sm" disabled={saving} onClick={() => void capture("task")}>
-                Task
-            </Button>
-            <Button
-                size="sm"
-                variant="outline"
-                disabled={saving}
-                onClick={() => void capture("note")}
-            >
-                Note
-            </Button>
-            {saved && (
-                <button
-                    className="cursor-pointer whitespace-nowrap font-mono text-[10px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
-                    onClick={() =>
-                        onNavigate?.(
-                            saved.startsWith("Task")
-                                ? { page: "planner", tab: "tasks" }
-                                : { page: "notes", tab: "notes" },
-                        )
-                    }
-                >
-                    {saved}
-                </button>
-            )}
-        </div>
-    );
-}
 ```
 
-Bookmarks strip (its own section under Today; hidden when empty):
+Render a "Test connection" button + the status line; when `ollamaModels.length > 0` and the selected provider is ollama, offer the names as a `<datalist>` on the default-model input (or a Select if the settings form uses one — match the existing control). Use the exact settings field names from `keys.ts` (`ollamaBaseUrl` verified).
 
-```tsx
-                {bookmarks.length > 0 && (
-                    <section>
-                        <h2 className="mb-2 font-mono text-xs uppercase tracking-[0.18em] text-muted-foreground">
-                            Bookmarks
-                        </h2>
-                        <div className="flex flex-wrap gap-1.5">
-                            {bookmarks.map((b) => (
-                                <button
-                                    key={b.id}
-                                    onClick={() => void openExternal(b.url)}
-                                    className="cursor-pointer rounded-full border border-border px-2.5 py-0.5 font-mono text-[10px] tracking-wider text-muted-foreground transition-colors hover:border-primary/50 hover:text-primary"
-                                >
-                                    {b.title}
-                                </button>
-                            ))}
-                            <button
-                                onClick={() => onNavigate?.({ page: "notes", tab: "bookmarks" })}
-                                className="cursor-pointer rounded-full px-2 py-0.5 font-mono text-[10px] uppercase text-muted-foreground hover:text-foreground"
-                            >
-                                all →
-                            </button>
-                        </div>
-                    </section>
-                )}
+- [ ] **Step 2: Guidance copy**
+
+Below the Ollama controls, a muted help block (plain language):
+
+```txt
+Free local models: llama3.2:3b (fast, ~2GB) or qwen3:4b (better reasoning,
+~2.6GB). Install Ollama from ollama.com, then `ollama pull llama3.2:3b`.
+If you open this app from a hosted URL instead of localhost, Ollama must
+allow that origin: set OLLAMA_ORIGINS=https://your-site.example before
+starting Ollama. Requests go straight from your browser to localhost —
+your machine, your model, nothing leaves.
 ```
-
-Recent chats (compact rows next to or under the stats; three rows: colored dot + title + relative time) navigating via `onNavigate?.({ page: "agents", tab: "chat", sessionId: s.id })`.
-
-Make navigation affordances of the existing UI:
-- StatTiles: wrap each `Card` in a button-like click → sessions→`{page:"agents",tab:"chat"}`, notes→`{page:"notes"}`, presets→`{page:"presets"}`; leave "documents indexed" static.
-- The three Today cards' headers become clickable → planner calendar / planner tasks / planner applications.
-
-Match the file's motion/Card idioms; keep additions in the existing max-w-4xl column.
-
-- [ ] **Step 3: Gates + browser check + commit**
-
-Run: `npm run typecheck && npm test` — Expected: PASS.
-Browser: Home shows bookmarks chips (open externally), quick capture creates a task (verify in Planner) and a note, recent chats open the right session, tiles/cards navigate.
-
-```bash
-git add src/app/Shell.tsx src/app/home/HomePage.tsx
-git commit -m "feat: home is a launcher — bookmarks, quick capture, recent chats"
-```
-
----
-
-### Task 7: Status bar — live, tappable readouts
-
-Verdict on the todo's "unless it's not recommended": worth doing at small scale. Two live readouts (tasks due today, next automation run) plus making the existing model chip navigate. The almanac aesthetic stays; StatusBar itself remains presentational — Shell composes the interactive children.
-
-**Files:**
-- Create: `src/components/hud/StatusReadouts.tsx`
-- Modify: `src/app/Shell.tsx` (compose readouts + clickable model chip)
-
-**Interfaces:**
-- Produces: `StatusReadouts({ onNavigate }: { onNavigate: (t: NavTarget) => void })`.
-
-- [ ] **Step 1: Create `StatusReadouts.tsx`**
-
-```tsx
-import { useEffect, useState } from "react";
-import { listOpenTasks } from "@/db/repo/tasks";
-import { listAutomations } from "@/db/repo/automations";
-import { relativeTime } from "@/components/hud/networkData";
-import type { NavTarget } from "@/app/Sidebar";
-
-function endOfToday(): number {
-    const d = new Date();
-    d.setHours(23, 59, 59, 999);
-    return d.getTime();
-}
-
-/**
- * Live almanac readouts for the status bar: open tasks due today and the
- * next scheduled automation. Refreshes every minute; failures leave the
- * previous values (the status bar must never error).
- */
-export function StatusReadouts({
-    onNavigate,
-}: {
-    onNavigate: (t: NavTarget) => void;
-}) {
-    const [dueToday, setDueToday] = useState<number | null>(null);
-    const [nextRun, setNextRun] = useState<number | null>(null);
-
-    useEffect(() => {
-        const refresh = async () => {
-            try {
-                setDueToday((await listOpenTasks({ dueBefore: endOfToday() })).length);
-                const autos = await listAutomations();
-                const next = autos
-                    .filter((a) => a.enabled === 1 && a.next_run_at !== null)
-                    .map((a) => a.next_run_at!)
-                    .sort((a, b) => a - b)[0];
-                setNextRun(next ?? null);
-            } catch {
-                // keep last values
-            }
-        };
-        void refresh();
-        const timer = setInterval(() => void refresh(), 60_000);
-        return () => clearInterval(timer);
-    }, []);
-
-    return (
-        <>
-            {dueToday !== null && dueToday > 0 && (
-                <button
-                    className="cursor-pointer hover:text-foreground"
-                    onClick={() => onNavigate({ page: "planner", tab: "tasks" })}
-                >
-                    {dueToday} due today
-                </button>
-            )}
-            {nextRun !== null && (
-                <button
-                    className="cursor-pointer hover:text-foreground"
-                    onClick={() => onNavigate({ page: "agents", tab: "automations" })}
-                >
-                    next run {relativeTime(nextRun)}
-                </button>
-            )}
-        </>
-    );
-}
-```
-
-Check `relativeTime`'s unit expectations against `next_run_at` (both are ms-era values in this codebase; if `relativeTime` renders nonsense for ms input, format inline with `toLocaleTimeString` instead and note it).
-
-- [ ] **Step 2: Compose in Shell**
-
-```tsx
-            <StatusBar>
-                <span>db linked</span>
-                <button
-                    className="cursor-pointer hover:text-foreground"
-                    onClick={() => setNav({ page: "settings" })}
-                >
-                    {settings.defaultProvider}/{settings.defaultModel}
-                </button>
-                <StatusReadouts onNavigate={setNav} />
-            </StatusBar>
-```
-
-- [ ] **Step 3: Gates + browser check + commit**
-
-Run: `npm run typecheck && npm test` — Expected: PASS.
-Browser: with a task due today the count appears and clicks through to Tasks; with an enabled automation the next-run chip appears and clicks through; model chip opens Settings.
-
-```bash
-git add src/components/hud/StatusReadouts.tsx src/app/Shell.tsx
-git commit -m "feat: status bar gains live due-today and next-automation readouts"
-```
-
----
-
-### Task 8: Refresh persistence — nav position + chat drafts
-
-Reload must land you where you were: same page, same tab, same open chat — and a half-typed chat message survives. Tab changes inside pages currently never reach `NavTarget`, so pages gain an `onTabChange` callback and ChatWorkspace reports the open session; Shell persists the merged NavTarget.
-
-**Files:**
-- Create: `src/lib/navPersist.ts`, `src/lib/navPersist.test.ts`
-- Modify: `src/app/Shell.tsx` (restore + persist; thread callbacks)
-- Modify: `src/app/agents/AgentsPage.tsx`, `src/app/notes/NotesPage.tsx`, `src/app/planner/PlannerPage.tsx` (report tab changes)
-- Modify: `src/app/chat/ChatWorkspace.tsx` (report opened session)
-- Modify: `src/components/chat/Composer.tsx` (draftKey persistence)
-
-**Interfaces:**
-- `loadNav(): NavTarget | null` / `saveNav(t: NavTarget): void` from `src/lib/navPersist.ts`.
-- Pages gain `onTabChange?: (tab: string) => void`; `ChatWorkspace` gains `onSessionOpened?: (id: string | null) => void`; `Composer` gains `draftKey?: string`.
-
-- [ ] **Step 1: Failing test — `src/lib/navPersist.test.ts`**
-
-```ts
-import { beforeEach, describe, expect, it } from "vitest";
-import { loadNav, saveNav } from "./navPersist";
-
-// Node 22+ exposes localStorage in vitest's node environment via --experimental
-// APIs inconsistently — stub a minimal one for determinism.
-beforeEach(() => {
-    const store = new Map<string, string>();
-    globalThis.localStorage = {
-        getItem: (k: string) => store.get(k) ?? null,
-        setItem: (k: string, v: string) => void store.set(k, v),
-        removeItem: (k: string) => void store.delete(k),
-        clear: () => store.clear(),
-        key: () => null,
-        length: 0,
-    } as Storage;
-});
-
-describe("nav persistence", () => {
-    it("round-trips a NavTarget", () => {
-        saveNav({ page: "planner", tab: "calendar" });
-        expect(loadNav()).toEqual({ page: "planner", tab: "calendar" });
-    });
-
-    it("rejects unknown pages and garbage", () => {
-        localStorage.setItem("hugh.nav.v1", JSON.stringify({ page: "nope" }));
-        expect(loadNav()).toBeNull();
-        localStorage.setItem("hugh.nav.v1", "not json");
-        expect(loadNav()).toBeNull();
-    });
-
-    it("keeps sessionId and projectId strings only", () => {
-        localStorage.setItem(
-            "hugh.nav.v1",
-            JSON.stringify({ page: "agents", tab: "chat", sessionId: 42 }),
-        );
-        expect(loadNav()).toEqual({ page: "agents", tab: "chat" });
-    });
-});
-```
-
-Run: `npx vitest run src/lib/navPersist.test.ts` — Expected: FAIL (module missing).
-
-- [ ] **Step 2: Implement `src/lib/navPersist.ts`**
-
-```ts
-import type { NavTarget, Page } from "@/app/Sidebar";
-
-const KEY = "hugh.nav.v1";
-const PAGES: readonly Page[] = [
-    "home",
-    "agents",
-    "categories",
-    "notes",
-    "planner",
-    "presets",
-    "permissions",
-    "settings",
-];
-
-/** Last nav position, or null when unset/corrupt. Never throws. */
-export function loadNav(): NavTarget | null {
-    try {
-        const raw = localStorage.getItem(KEY);
-        if (!raw) return null;
-        const parsed = JSON.parse(raw) as Record<string, unknown>;
-        if (!PAGES.includes(parsed.page as Page)) return null;
-        const nav: NavTarget = { page: parsed.page as Page };
-        if (typeof parsed.tab === "string") nav.tab = parsed.tab;
-        if (typeof parsed.sessionId === "string") nav.sessionId = parsed.sessionId;
-        if (typeof parsed.projectId === "string") nav.projectId = parsed.projectId;
-        return nav;
-    } catch {
-        return null;
-    }
-}
-
-export function saveNav(t: NavTarget): void {
-    try {
-        localStorage.setItem(KEY, JSON.stringify(t));
-    } catch {
-        // storage full/blocked — losing persistence is fine, breaking nav isn't
-    }
-}
-```
-
-Run the test — Expected: PASS.
-
-- [ ] **Step 3: Shell restore + persist + callbacks**
-
-```tsx
-    const [nav, setNav] = useState<NavTarget>(() => loadNav() ?? { page: "home" });
-    useEffect(() => {
-        saveNav(nav);
-    }, [nav]);
-    const onTabChange = useCallback(
-        (tab: string) => setNav((n) => ({ ...n, tab })),
-        [],
-    );
-```
-
-Pass `onTabChange={onTabChange}` to AgentsPage/NotesPage/PlannerPage, and to AgentsPage additionally `onSessionOpened={(id) => setNav((n) => ({ ...n, sessionId: id ?? undefined }))}` (threaded to ChatWorkspace).
-
-In each of the three pages, the TabBar's `onSelect` wraps:
-
-```tsx
-                <TabBar
-                    tabs={TABS}
-                    active={active}
-                    onSelect={(t) => {
-                        setActive(t);
-                        onTabChange?.(t);
-                    }}
-                />
-```
-
-In `ChatWorkspace`, call `onSessionOpened?.(session.id)` at the end of `openSession`'s success path, and `onSessionOpened?.(null)` when the active session is deleted (in `deleteInstance`'s branch that clears `active`). The existing `initialSessionId` deep-link effect then restores the chat on reload.
-
-- [ ] **Step 4: Composer drafts**
-
-`Composer` props gain `draftKey?: string`. Behavior:
-
-```tsx
-    const [text, setText] = useState(() => {
-        if (!draftKey) return "";
-        try {
-            return localStorage.getItem(`hugh.draft.${draftKey}`) ?? "";
-        } catch {
-            return "";
-        }
-    });
-
-    // Persist the draft, debounced; clear the key when the draft empties.
-    useEffect(() => {
-        if (!draftKey) return;
-        const key = `hugh.draft.${draftKey}`;
-        const handle = setTimeout(() => {
-            try {
-                if (text) localStorage.setItem(key, text);
-                else localStorage.removeItem(key);
-            } catch {
-                // best-effort
-            }
-        }, 300);
-        return () => clearTimeout(handle);
-    }, [draftKey, text]);
-```
-
-The send path already does `setText("")` — the effect then removes the key. In `ChatWorkspace`'s `ActiveChatView`, pass `draftKey={active.session.id}` to `<Composer …>`.
-
-- [ ] **Step 5: Gates + browser check + commit**
-
-Run: `npm run typecheck && npm test` — Expected: PASS.
-Browser: open Planner→Calendar, reload → still there; open a chat, reload → same chat open; type into the composer without sending, reload → text restored; send → draft gone after reload; switch tabs via ⌘K palette → also persisted.
-
-```bash
-git add src/lib/navPersist.ts src/lib/navPersist.test.ts src/app/Shell.tsx src/app/agents/AgentsPage.tsx src/app/notes/NotesPage.tsx src/app/planner/PlannerPage.tsx src/app/chat/ChatWorkspace.tsx src/components/chat/Composer.tsx
-git commit -m "feat: refresh keeps your place — nav position and chat drafts persist"
-```
-
----
-
-### Task 9: Tasks tab — status + due-window filters (QA request)
-
-QA asked for "more detailed filtering, including the ability to hide already completed tasks." Open tasks get a due-window filter row (Overdue / Today / This week) alongside the category chips, and a "show completed" toggle reveals recently-completed tasks with reopen/delete. The repo already has everything (`listCompletedTasks(limit=30)`, `reopenTask`) — this is pure TasksTab UI.
-
-**Files:**
-- Modify: `src/app/planner/TasksTab.tsx`
-
-**Interfaces:**
-- Consumes: `tasksRepo.listCompletedTasks`, `tasksRepo.reopenTask`, `FilterChips`.
-- Produces: no new exports.
-
-- [ ] **Step 1: Due-window filter**
-
-```tsx
-type DueWindow = "overdue" | "today" | "week";
-const DUE_WINDOWS: { id: DueWindow; label: string }[] = [
-    { id: "overdue", label: "Overdue" },
-    { id: "today", label: "Today" },
-    { id: "week", label: "This week" },
-];
-
-function inDueWindow(t: Task, w: DueWindow): boolean {
-    if (t.due_at === null) return false;
-    const now = Date.now();
-    if (w === "overdue") return t.due_at < now;
-    const eod = new Date();
-    eod.setHours(23, 59, 59, 999);
-    if (w === "today") return t.due_at <= eod.getTime();
-    return t.due_at <= now + 7 * DAY;
-}
-```
-
-State `const [dueWindow, setDueWindow] = useState<DueWindow | null>(null);` — a second `FilterChips` row (`options={DUE_WINDOWS}`, `allLabel="Any due date"`) under the category chips. The list filter composes: `tasks.filter((t) => (!categoryFilter || t.category_id === categoryFilter) && (!dueWindow || inDueWindow(t, dueWindow)))`. ("Today"/"This week" deliberately include overdue items — an overdue task is still due today.)
-
-- [ ] **Step 2: Completed section**
-
-```tsx
-    const [showCompleted, setShowCompleted] = useState(false);
-    const [completed, setCompleted] = useState<Task[]>([]);
-    useEffect(() => {
-        if (showCompleted) void tasksRepo.listCompletedTasks().then(setCompleted);
-    }, [showCompleted, tasks]);
-```
-
-(`tasks` in the deps so completing a task while the section is open refreshes it.) Below the open-task list:
-
-```tsx
-            <button
-                className="cursor-pointer self-start font-mono text-[10px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
-                onClick={() => setShowCompleted((v) => !v)}
-            >
-                {showCompleted ? "hide completed" : "show completed"}
-            </button>
-            {showCompleted && (
-                <div className="flex flex-col gap-1.5 opacity-70">
-                    {completed.map((t) => (
-                        <div
-                            key={t.id}
-                            className="flex items-center gap-3 rounded-md border border-border/60 bg-card/40 px-3 py-2"
-                        >
-                            <Button
-                                variant="ghost"
-                                size="icon"
-                                aria-label={`Reopen ${t.title}`}
-                                onClick={() => void act(() => tasksRepo.reopenTask(t.id))}
-                            >
-                                <RotateCcw className="h-4 w-4" />
-                            </Button>
-                            <span className="flex-1 text-sm line-through decoration-muted-foreground/50">
-                                {t.title}
-                            </span>
-                            <Button
-                                variant="ghost"
-                                size="icon"
-                                aria-label={`Delete ${t.title}`}
-                                onClick={() => void act(() => tasksRepo.deleteTask(t.id))}
-                            >
-                                <Trash2 className="h-4 w-4" />
-                            </Button>
-                        </div>
-                    ))}
-                    {completed.length === 0 && (
-                        <p className="text-xs text-muted-foreground">Nothing completed yet.</p>
-                    )}
-                </div>
-            )}
-```
-
-(Import `RotateCcw` from lucide-react. `act` is TasksTab's existing helper — reopening triggers `reload()`, which refreshes the open list too.)
 
 - [ ] **Step 3: Gates + commit**
 
-Run: `npm run typecheck && npm test` — Expected: PASS.
-(User-checkable later: window chips compose with category chips; completed section reopens/deletes.)
+`npm run typecheck && npm test` → PASS.
 
 ```bash
-git add src/app/planner/TasksTab.tsx
-git commit -m "feat: task due-window filters and a completed section with reopen"
+git add src/app/settings/SettingsPage.tsx
+git commit -m "feat: ollama test-connection, live model list, and hosted-origin guidance"
 ```
 
 ---
 
-### Task 10: Docs, gates, close the todo round
+### Task 7: Usage visibility — know when the free tier will bite
 
 **Files:**
-- Modify: `docs/todo.md` (check off this round's UX/Features items; keep "possible future problems" as-is)
-- Modify: `docs/architecture.md` (data-model note: `events.source = 'manual'` for user-created events; one line in the shell description for status readouts)
+- Modify: `src/db/repo/usage.ts` (only if `usageByDay` lacks a model/provider dimension — read it first)
+- Modify: `src/app/settings/SettingsPage.tsx` (Usage card)
 
-- [ ] **Step 1: docs/todo.md** — mark the five UX items and four Features items `[x]`-style or move them into a dated "shipped 2026-07-XX" section matching the file's existing convention; leave the not-urgent section untouched.
+**Interfaces:**
+- Consumes: `usageByDay(days)` → verify its `DailyUsage` shape before writing UI; extend the SQL with a `model` group-by only if absent (messages carry `model`, `input_tokens`, `output_tokens`).
 
-- [ ] **Step 2: docs/architecture.md** — in the data-model block's `events` row (or nearest prose), note manual events (`source 'manual'`, created/deleted from the calendar). No restructuring.
+- [ ] **Step 1: Read `usage.ts`; extend if needed (with a test)**
 
-- [ ] **Step 3: Full gates**
+If `DailyUsage` already breaks out model/provider, skip. Otherwise add `usageByDayAndModel(days = 14)` grouping `chat_messages` by day + `model`, summing input/output/cached tokens, with a repo test (insert two messages on different days/models via `insertMessage`, assert the grouping).
 
-Run: `npm run typecheck && npm test` — Expected: PASS, no skips.
+- [ ] **Step 2: Usage card in Settings**
 
-- [ ] **Step 4: Full browser QA sweep** (Playwright; fall back to a human pass only if the browser cannot launch): run the browser checks from Tasks 1-8 end to end against a fresh `npm run dev`, plus one regression lap: categories page, calendar modes, chat search/filter, pipelines template run, review tab.
+A "Usage" Card at the bottom of SettingsPage: table of the last 14 days (day · model · input tok · output tok), today's row highlighted (`text-primary`), totals row per model, and the blurb:
 
-- [ ] **Step 5: Commit**
+```txt
+Token counts are real usage reported by each provider, summed from your
+message history. Gemini's free tier resets daily (around midnight Pacific);
+when today's Gemini row climbs toward your quota, switch the preset to
+Ollama or another key. Requests-per-day quotas are not shown — this tracks
+tokens only.
+```
+
+Load via `useEffect` on mount; render "no usage recorded yet" when empty. Format numbers with `toLocaleString()`.
+
+- [ ] **Step 3: Gates + commit**
+
+`npm run typecheck && npm test` → PASS.
 
 ```bash
-git add docs
-git commit -m "docs: close out the home/polish todo round"
+git add src/db/repo/usage.ts src/app/settings/SettingsPage.tsx
+git commit -m "feat: settings shows per-day per-model token usage with free-tier guidance"
 ```
+
+(Include the usage test file if created.)
+
+---
+
+### Task 8: Hosting readiness — Cloudflare Pages headers, production proxy, deploy guide
+
+**Files:**
+- Create: `public/_headers`
+- Create: `functions/__proxy.ts`
+- Create: `docs/hosting.md`
+- Modify: `docs/architecture.md` (pointer), `tsconfig.json` (exclude `functions/` ONLY if `npm run typecheck` sweeps it)
+
+- [ ] **Step 1: `public/_headers`** (Vite copies `public/` into `dist/` verbatim; Cloudflare Pages reads `_headers` from the output root):
+
+```txt
+/*
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: require-corp
+```
+
+- [ ] **Step 2: `functions/__proxy.ts`** — same contract as the Vite middleware (`/__proxy?url=`), structural types, no deps:
+
+```ts
+/**
+ * Cloudflare Pages Function serving the same /__proxy?url= contract as the
+ * dev server middleware (vite.config.ts) — the hosted browser build's web
+ * tools (wrapWebFetch) route through here because arbitrary sites don't
+ * send CORS headers. Fresh outbound fetch (no cookie/header forwarding);
+ * only content-type is copied back.
+ */
+interface ProxyContext {
+    request: Request;
+}
+
+export async function onRequest({ request }: ProxyContext): Promise<Response> {
+    const url = new URL(request.url).searchParams.get("url");
+    if (!url) return new Response("missing url", { status: 400 });
+    let target: URL;
+    try {
+        target = new URL(url);
+    } catch {
+        return new Response("invalid url", { status: 400 });
+    }
+    if (target.protocol !== "http:" && target.protocol !== "https:")
+        return new Response("http(s) only", { status: 400 });
+    try {
+        const upstream = await fetch(target.toString(), {
+            headers: { accept: "text/html, text/plain, application/json" },
+            redirect: "follow",
+        });
+        return new Response(upstream.body, {
+            status: upstream.status,
+            headers: {
+                "content-type":
+                    upstream.headers.get("content-type") ?? "text/plain",
+            },
+        });
+    } catch (e) {
+        return new Response(
+            `proxy fetch failed: ${e instanceof Error ? e.message : String(e)}`,
+            { status: 502 },
+        );
+    }
+}
+```
+
+Run `npm run typecheck` — if tsc sweeps `functions/` and errors (DOM lib types should cover Request/Response/URL/fetch; `tsconfig.json` includes what?), add `"functions"` to the exclude list and note it. The function must NOT be imported by `src/` code.
+
+- [ ] **Step 3: `docs/hosting.md`** — a complete, honest deploy guide:
+
+Sections (write real prose, not stubs):
+1. **What hosting means here**: the web build is a static SPA + one proxy function; every visitor's data lives in THEIR browser (OPFS SQLite) and their API keys in THEIR localStorage — nothing server-side, no accounts. Backup = the in-app backup, per browser.
+2. **Cloudflare Pages (recommended)**: connect the repo in the dashboard → build command `npm run build`, output `dist` → `_headers` ships COOP/COEP (required for OPFS) → `functions/__proxy.ts` auto-deploys → done. Free tier limits (100k function requests/day) are far beyond personal use.
+3. **Why not GitHub Pages**: cannot set response headers → no COOP/COEP → OPFS unavailable (DB falls back or fails — state which, per `webClient.ts`'s behavior; check and document accurately).
+4. **Ollama for hosted visitors**: browser → localhost:11434 needs `OLLAMA_ORIGINS=https://your-site` on the visitor's machine (mirror Task 6's copy).
+5. **Security notes**: the proxy is an open fetch relay for whoever can reach the site — Cloudflare Access (free for small teams) can gate the whole deployment if the URL should be private; API keys never leave the visitor's browser except direct-to-provider calls.
+6. **Desktop remains first-class**: Tauri build unaffected; hosted and desktop instances have separate databases.
+
+Verify the claims against the code while writing (webClient OPFS fallback behavior especially).
+
+- [ ] **Step 4: Build gate + commit**
+
+Run: `npm run typecheck && npm test && npm run build` — all three must pass (`build` = `tsc --noEmit && vite build`).
+
+```bash
+git add public/_headers functions/__proxy.ts docs/hosting.md docs/architecture.md tsconfig.json
+git commit -m "feat: hosting readiness — COOP/COEP headers, production proxy function, deploy guide"
+```
+
+(Only include tsconfig.json if it changed.)
+
+---
+
+### Task 9: Docs, todo trim, final review
+
+**Files:**
+- Modify: `docs/todo.md`, `docs/architecture.md`
+
+- [ ] **Step 1: Rewrite `docs/todo.md`** per the user's instruction: REMOVE the items this plan ships (hourly 1-day view, metadata-referencing confirmation, paste-text upload, web-search/permission trust, ollama setup, usage visibility, exo layers); KEEP, verbatim, the deferred items — School/Schedule tab, private instances, automation/pipeline file inclusion, home widgets — plus the untouched "Possible future problems" section. Add a line noting drafts are now bounded (QA item, wasn't in the todo).
+- [ ] **Step 2: `docs/architecture.md`** — add the "Reads only" level to the permission-model section's builtin list; add a Hosting paragraph pointing at docs/hosting.md.
+- [ ] **Step 3: Full gates**: `npm run typecheck && npm test && npm run build` → PASS.
+- [ ] **Step 4: Final whole-branch review** (most capable model — the only independent review of the round), then fix wave if needed.
+- [ ] **Step 5: Commit** `docs: close out the trust/hosting round`, then hand the user the QA list.
 
 ---
 
 ## Self-Review (performed while writing)
 
-**Todo coverage:**
-- *Calendar event creation UI* → Task 2 (QuickEvent, `source: "manual"`, delete).
-- *1-day view* → Task 2 Step 3.
-- *Exo-sphere mostly out of view until scroll-out* → Task 3 (zoom-driven reveal, hit gating, first-paint hidden).
-- *Agent visualization back, subtler* → Task 4 (agent-only satellites at r=1.0, chips on hover; explicitly paired with the exo fix as the todo suggests).
-- *New chats/notes inherit project/category context* → Task 5 (creationCategoryId, project-star navigation → ProjectDetail's existing project-chat flow, notes inherit filter, CategoryDetail New-note-here).
-- *Automation research lookups fail* → Task 1, root-caused to the stale KNOWN_TOOLS list (verified against src/app/permissions/PermissionsPage.tsx:11 — search_web absent → ungrantable → auto-denied headless). Coverage test + preflight warning prevent recurrence.
-- *Home menu functionality* → Task 6 (bookmarks strip with openExternal, quick capture, recent chats, clickable tiles/cards).
-- *Bottom tab functionality* → Task 7 (recommended yes, at small scale; decision recorded).
-- *Refresh loses place/progress* → Task 8 (nav restore incl. tab + open session, composer drafts; task quick-add drafts deliberately skipped, recorded).
-- *"Possible future problems"* → deliberately untouched, per the todo's own framing.
-- *QA round (2026-07-17)*: relativeTime ms bug → Task 3 Step 0a; exo-shell too close → Task 3 Step 0b (1.75); double-click rename → Task 5 Step 5b; detailed task filtering + hide completed → Task 9.
+**Todo coverage:** hourly 1-day view → Task 3; School tab → deferred (recorded); metadata-only file referencing → Task 4 (verified true, documented); custom-text upload → Task 4; web-search denial + reads-only level → Task 1 (with diagnosis: DDG reachable, deny is engine-side, value-less scoped grants identified as the never-matching trap); private instances → deferred; Ollama setup → Task 6; usage visibility → Task 7; exo layers/pull-in/inner-hide → Task 5; automation file contexts → deferred; home widgets → deferred; QA draft-limits request → Task 2; hosting readiness → Task 8.
 
-**Placeholder scan:** all code steps carry code; the spots requiring reconciliation with live code name the exact file/line (PermissionsPage JSX around line 183, Badge warning tone, `listBookmarks` filter signature, `relativeTime` unit check, networkData test factory names).
+**Placeholder scan:** every code step carries code; steps that depend on live signatures name the exact file to read first (documents.ts create path, usage.ts shape, ItemChip's onDelete wiring, webClient OPFS fallback, settings field names).
 
-**Type consistency:** `NavTarget.projectId` (Task 5 Step 1) matches `navPersist`'s field handling (Task 8 Step 2); `onTabChange`/`onSessionOpened` signatures match between Shell (Task 8 Step 3) and the pages; `CalendarItem.refId`/`manual` (Task 2 Step 2) match DayList's `onDeleteManual` usage (Step 4); `attachAgent`'s opts (Task 4) default to prior behavior so existing callers/tests stay valid; `InstancesSidebar`'s lifted `categoryFilter` props (Task 5 Step 2) match ChatWorkspace's state and the Task 8 changes don't touch them.
+**Type consistency:** `EXO_SHELL_BASE`/`EXO_SHELL_STEP`/`EXO_LAYER_SIZE` names match between networkData (Task 5 Step 2), its tests (Step 1), and NetworkSphere's derivation (Step 3); drafts.ts function names match the Composer/ChatWorkspace swaps; `BUILTIN_LEVELS.readsOnly` matches the test's usage; `ungrantedTools`' signature is unchanged by the move to preflight.ts; the proxy function's contract (`/__proxy?url=`, content-type-only response headers) matches `wrapWebFetch` and the vite middleware.
