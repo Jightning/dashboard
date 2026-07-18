@@ -6,6 +6,7 @@ import {
     SUGGESTED_MODELS,
     type ProviderId,
 } from "@/ai/providers/registry";
+import { appFetch } from "@/ai/providers/appFetch";
 import { availableProviders, isTauri } from "@/lib/env";
 import { runDailyBackup, exportNotesMarkdown } from "@/lib/backup";
 import { usageByDay, type DailyUsage } from "@/db/repo/usage";
@@ -20,10 +21,33 @@ export function SettingsPage() {
     const [saved, setSaved] = useState(false);
     const [backupStatus, setBackupStatus] = useState<string | null>(null);
     const [usage, setUsage] = useState<DailyUsage[]>([]);
+    const [ollamaStatus, setOllamaStatus] = useState<string | null>(null);
+    const [ollamaModels, setOllamaModels] = useState<string[]>([]);
 
     useEffect(() => {
         usageByDay(14).then(setUsage).catch((e) => console.error(e));
     }, []);
+
+    const testOllama = async () => {
+        setOllamaStatus("checking…");
+        setOllamaModels([]);
+        try {
+            const res = await appFetch(`${form.ollamaBaseUrl}/api/tags`);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = (await res.json()) as { models?: { name: string }[] };
+            const names = (data.models ?? []).map((m) => m.name);
+            setOllamaModels(names);
+            setOllamaStatus(
+                names.length
+                    ? `connected — ${names.length} model${names.length === 1 ? "" : "s"} installed`
+                    : "connected, but no models installed — run: ollama pull llama3.2:3b",
+            );
+        } catch (e) {
+            setOllamaStatus(
+                `not reachable (${e instanceof Error ? e.message : String(e)}) — is Ollama running?`,
+            );
+        }
+    };
 
     const backUpNow = async () => {
         setBackupStatus("backing up…");
@@ -117,6 +141,32 @@ export function SettingsPage() {
                                 }
                             />
                         </label>
+                        <div className="flex items-center gap-3">
+                            <Button
+                                type="button"
+                                variant="outline"
+                                onClick={testOllama}
+                            >
+                                Test connection
+                            </Button>
+                            {ollamaStatus && (
+                                <span className="font-mono text-xs text-muted-foreground">
+                                    {ollamaStatus}
+                                </span>
+                            )}
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                            Free local models: llama3.2:3b (fast, ~2GB) or
+                            qwen3:4b (better reasoning, ~2.6GB). Install
+                            Ollama from ollama.com, then{" "}
+                            <code>ollama pull llama3.2:3b</code>. If you open
+                            this app from a hosted URL instead of localhost,
+                            Ollama must allow that origin: set{" "}
+                            <code>OLLAMA_ORIGINS=https://your-site.example</code>{" "}
+                            before starting Ollama. Requests go straight from
+                            your browser to localhost — your machine, your
+                            model, nothing leaves.
+                        </p>
                     </CardContent>
                 </Card>
 
@@ -179,7 +229,11 @@ export function SettingsPage() {
                             />
                         </label>
                         <datalist id="model-suggestions">
-                            {SUGGESTED_MODELS[form.defaultProvider].map((m) => (
+                            {(form.defaultProvider === "ollama" &&
+                            ollamaModels.length > 0
+                                ? ollamaModels
+                                : SUGGESTED_MODELS[form.defaultProvider]
+                            ).map((m) => (
                                 <option key={m} value={m} />
                             ))}
                         </datalist>
