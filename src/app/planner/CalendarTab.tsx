@@ -158,10 +158,18 @@ export function CalendarTab() {
             />
             {mode === "month" ? (
                 <MonthGrid from={from} items={visible} anchor={anchor} />
+            ) : mode === "1d" ? (
+                <HourDay
+                    from={from}
+                    items={visible}
+                    onDeleteManual={(item) =>
+                        void act(() => deleteEvent(item.refId))
+                    }
+                />
             ) : (
                 <DayList
                     from={from}
-                    days={mode === "1d" ? 1 : mode === "7d" ? 7 : 14}
+                    days={mode === "7d" ? 7 : 14}
                     items={visible}
                     onDeleteManual={(item) =>
                         void act(() => deleteEvent(item.refId))
@@ -295,6 +303,63 @@ function ItemChip({
                     <X className="h-3 w-3" />
                 </button>
             )}
+        </div>
+    );
+}
+
+function HourDay({
+    from,
+    items,
+    onDeleteManual,
+}: {
+    from: number;
+    items: CalendarItem[];
+    onDeleteManual?: (item: CalendarItem) => void;
+}) {
+    const nowHour =
+        startOfDay(Date.now()) === from ? new Date().getHours() : -1;
+    return (
+        <div className="flex flex-col">
+            {Array.from({ length: 24 }, (_, h) => {
+                const hourStart = from + h * 3_600_000;
+                const hourItems = items.filter(
+                    (x) => x.at >= hourStart && x.at < hourStart + 3_600_000,
+                );
+                return (
+                    <div
+                        key={h}
+                        className={cn(
+                            "flex min-h-8 gap-3 border-t border-border/40 px-1 py-0.5",
+                            h === nowHour && "bg-primary/5",
+                        )}
+                    >
+                        <span
+                            className={cn(
+                                "w-12 shrink-0 pt-0.5 text-right font-mono text-[10px] text-muted-foreground/70",
+                                h === nowHour && "text-primary",
+                            )}
+                        >
+                            {new Date(hourStart).toLocaleTimeString(undefined, {
+                                hour: "numeric",
+                            })}
+                        </span>
+                        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                            {hourItems.map((x) => (
+                                <ItemChip
+                                    key={x.id}
+                                    item={x}
+                                    showTime
+                                    onDelete={
+                                        x.manual
+                                            ? () => onDeleteManual?.(x)
+                                            : undefined
+                                    }
+                                />
+                            ))}
+                        </div>
+                    </div>
+                );
+            })}
         </div>
     );
 }
