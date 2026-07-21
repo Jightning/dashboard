@@ -4,6 +4,8 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { fileURLToPath } from "node:url";
 
+import { cloudflare } from "@cloudflare/vite-plugin";
+
 // The browser target can't fetch cross-origin (CORS + this server's COEP
 // header). Web tools route through /__proxy?url= instead; the dev server
 // fetches server-side and replies same-origin. Desktop never hits this —
@@ -47,7 +49,7 @@ function corsProxy(): Plugin {
 
 // Tauri expects a fixed dev port and no clearing of its own CLI output.
 export default defineConfig({
-    plugins: [react(), tailwindcss(), corsProxy()],
+    plugins: [react(), tailwindcss(), corsProxy(), cloudflare()],
     resolve: {
         alias: {
             "@": fileURLToPath(new URL("./src", import.meta.url)),
