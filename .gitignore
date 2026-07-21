@@ -6,3 +6,6 @@ src-tauri/gen/
 .DS_Store
 evalite-report/
 *.db
+
+.claude/
+docs/
