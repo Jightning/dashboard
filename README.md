@@ -1,6 +1,6 @@
 # Personal Dashboard
 
-A Tauri 2 + React/TypeScript AI OS:
+A Tauri 2 + React/TypeScript AI OS (guided vibe coding):
 a multi-agent assistant over personal data, protected by defined permission levels.
 
 ## Windows setup
